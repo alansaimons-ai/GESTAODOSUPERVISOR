@@ -113,7 +113,8 @@ function gerarEscala(ym,aid){
   const freeDays=(c,days)=>days.every(d=>getV(c.id,d)===undefined&&!onVac(c.id,d));
   const vacIn=(c,a1,b1)=>range(a1,b1).some(d=>onVac(c.id,d));
   const putFO=(c,d)=>{if(d&&getV(c.id,d)===undefined&&!onVac(c.id,d))setV(c.id,d,'FO');};
-  const order=(t,b,list)=>list.sort((x,y)=>{const hx=H[x.id],hy=H[y.id];const ax=(hx.wk.has(add(b.key,-7))||hx.wk.has(add(b.key,7)))?1:0,ay=(hy.wk.has(add(b.key,-7))||hy.wk.has(add(b.key,7)))?1:0;return hx.m-hy.m||hx.ms[t]-hy.ms[t]||ax-ay||cmp(hx.last[t],hy.last[t])||hx.h90-hy.h90||hx.r-hy.r;});
+  const RP=(list,t,b,days)=>{const f=list.filter(c=>ruleOk(c,t,b,days||b.dias,H[c.id]));if(f.length)return f;const g=list.filter(c=>ruleOk(c,t,b,days||b.dias,H[c.id],true));return g.length?g:list;};
+  const order=(t,b,list)=>RP(list,t,b).sort((x,y)=>{const hx=H[x.id],hy=H[y.id];const ax=(hx.wk.has(add(b.key,-7))||hx.wk.has(add(b.key,7)))?1:0,ay=(hy.wk.has(add(b.key,-7))||hy.wk.has(add(b.key,7)))?1:0;return hx.m-hy.m||hx.ms[t]-hy.ms[t]||ax-ay||cmp(hx.last[t],hy.last[t])||hx.h90-hy.h90||hx.r-hy.r;});
   const mark=(c,t,b)=>{const h=H[c.id];h.m++;h.ms[t]++;h.last[t]=b.start;h.wk.add(b.key);};
   const missing=[];
   for(const b of blocks){
@@ -146,8 +147,8 @@ function gerarEscala(ym,aid){
       const w=dow(d);let pref=[];
       if(w>=4){const nb=allB.find(b=>b.start>d&&ddiff(d,b.start)<=3);if(nb)pref=cs.filter(c=>isNum(getV(c.id,nb.dias[0])));}
       else{const pb=allB.filter(b=>b.end<d&&ddiff(b.end,d)<=3).pop();if(pb)pref=cs.filter(c=>isNum(getV(c.id,pb.end)));}
-      let c=pref.find(c=>freeDays(c,[d])&&!nearVac(c.id,d,d));
-      if(!c){let ok=cs.filter(c=>c.sa!==false&&freeDays(c,[d]));const ov=ok.filter(c=>!nearVac(c.id,d,d));if(ov.length)ok=ov;ok=ok.sort((x,y)=>H[x.id].night-H[y.id].night||H[x.id].m-H[y.id].m||H[x.id].r-H[y.id].r);c=ok[0];}
+      let c=pref.find(c=>freeDays(c,[d])&&!nearVac(c.id,d,d)&&ruleOk(c,'N',null,[d],H[c.id]));
+      if(!c){let ok=cs.filter(c=>c.sa!==false&&freeDays(c,[d]));const ov=ok.filter(c=>!nearVac(c.id,d,d));if(ov.length)ok=ov;ok=RP(ok,'N',null,[d]).sort((x,y)=>H[x.id].night-H[y.id].night||H[x.id].m-H[y.id].m||H[x.id].r-H[y.id].r);c=ok[0];}
       if(!c){missing.push(`${DSEM[w]} ${fmtS(d)}: noite sem sobreaviso`);return;}
       setV(c.id,d,a.noturnoH);H[c.id].night+=a.noturnoH;
     });
@@ -555,7 +556,7 @@ function rEscala(){
   <select data-ui="areaId"><option value="">Todas as áreas</option>${areasSorted().map(x=>`<option value="${x.id}" ${x.id===ui.areaId?'selected':''}>${esc(x.nome)}</option>`).join('')}</select><span class="sp"></span>
   <button class="btn needs-edit" data-act="newSN">+ Sobreaviso em vários dias</button>${shareBtn()}<button class="btn" data-act="copyTsv">Copiar para Excel</button><button class="btn dan needs-edit" data-act="limpar" title="Remove sobreavisos, J3 e folgas de plantão do mês (mantém férias, BH, FA e atestados)">✕ Limpar escala</button><button class="btn pri needs-edit" data-act="gen">⚙ Gerar escala ${ui.areaId?'da área':'de todas as áreas'}</button></div>
   ${alerts.length?`<div class="card"><h3>Alertas (${alerts.filter(a=>a.lvl==='err').length} críticos · ${alerts.filter(a=>a.lvl==='warn').length} atenção · ${alerts.filter(a=>a.lvl==='info').length} info)</h3>${alertHtml(shown)}${alerts.length>6?`<button class="btn sm" data-act="allAl">${ui.allAl?'Mostrar menos':`Ver todos os ${alerts.length}`}</button>`:''}</div>`:'<div class="alert ok">✅ Escala dentro das regras.</div>'}
-  <div class="legend"><span><i class="tag t-SA">24</i>Horas de sobreaviso (⚡ acionado)</span><span><i class="tag t-J3">J3</i>Plantão 08h–17h</span><span><i class="tag t-F">FO</i>Folga</span><span><i class="tag t-FE">FE</i>Férias</span><span><i class="tag t-BH">BH</i>Banco de horas</span><span><i class="tag t-FA">FA</i>Folga abonada</span><span><i class="tag t-AT">AT</i>Atestado</span><span><i class="tag t-X">M</i>Outros</span></div>
+  ${orientacoesHtml()}<div class="legend"><span><i class="tag t-SA">24</i>Horas de sobreaviso (⚡ acionado)</span><span><i class="tag t-J3">J3</i>Plantão 08h–17h</span><span><i class="tag t-F">FO</i>Folga</span><span><i class="tag t-FE">FE</i>Férias</span><span><i class="tag t-BH">BH</i>Banco de horas</span><span><i class="tag t-FA">FA</i>Folga abonada</span><span><i class="tag t-AT">AT</i>Atestado</span><span><i class="tag t-X">M</i>Outros</span></div>
   <div class="gridwrap" data-keep="grid"><table class="g"><thead><tr><th class="nm" rowspan="2">Colaborador</th>${head1}<th rowspan="2">J3<br>dias</th><th rowspan="2">Horas<br>SA</th><th rowspan="2">Plan-<br>tões</th></tr><tr>${head2}</tr></thead><tbody>${body}<tr class="foot"><td class="nm"><b>Total de horas</b></td><td colspan="${days.length+1}"></td><td class="tot">${tot.toLocaleString('pt-BR')}h</td><td></td></tr></tbody></table></div>
   <div class="card" style="margin-top:16px"><h3>Plantonistas por fim de semana e feriado</h3><div class="wk">${wk}</div></div>`;
 }
@@ -764,7 +765,7 @@ function rConfig(){
    <div class="needs-admin"><textarea id="imp" placeholder="…ou cole aqui o conteúdo do backup" style="width:100%;height:80px;font-family:monospace;font-size:12px"></textarea><div class="bar" style="margin-top:8px"><button class="btn" data-act="importPaste">Importar texto colado</button></div></div></div>
   ${ROLE()!=='leitura'?`<div class="card"><h3>Histórico de alterações</h3><p class="hint" style="margin-top:0">Toda alteração fica registrada no banco com usuário, data e o valor anterior.</p>${AUDIT?auditHtml():'<button class="btn" data-act="loadAudit">Carregar últimas alterações</button>'}</div>`:''}
   ${metasCard()}<div class="card"><h3>Regras do gerador</h3><div class="fg"><label>Sem plantão nos dias antes das férias<input type="number" min="0" max="10" data-chg="cfgNum" data-k="semPlantaoAntesFerias" value="${vacBuf().antes}" ${isAdmin()?'':'disabled'}></label><label>Sem plantão nos dias após o retorno<input type="number" min="0" max="10" data-chg="cfgNum" data-k="semPlantaoAposFerias" value="${vacBuf().depois}" ${isAdmin()?'':'disabled'}></label></div><p class="hint">Ex.: com 3 dias, quem sai de férias na segunda não pega o plantão do fim de semana anterior nem a noite de sexta. Se a equipe não tiver outra pessoa disponível, o gerador escala assim mesmo e mostra um alerta.</p></div>
-  <div class="card"><h3>Regras aplicadas</h3><ul class="rules small">
+  ${regrasCard()}<div class="card"><h3>Regras fixas do sistema</h3><ul class="rules small">
    <li><b>Véspera e retorno de férias</b>: sem plantão nos ${vacBuf().antes} dia(s) antes do início das férias e no(s) ${vacBuf().depois} dia(s) após o retorno, quando houver outra pessoa disponível.</li>
    <li><b>Formato</b>: igual à planilha — número na célula = horas de sobreaviso no dia; J3, FO, BH, FA, AT como siglas. Férias vêm do módulo de férias (FE).</li>
    <li><b>Padrão por área</b>: quantidade de J3 e sobreaviso por fim de semana, horas de sábado/domingo/feriado, noites de semana e folgas automáticas.</li>
@@ -991,52 +992,6 @@ const grpSum=(rows,f)=>{const m={};rows.forEach(r=>{const k=f(r);(m[k]=m[k]||{k,
 const hh=n=>{const m=Math.round((+n||0)*60);return `${Math.floor(m/60)}h${pad(m%60)}`;};
 // HE que caiu em dia de sobreaviso da pessoa (mesmo dia, ou madrugada seguinte a uma noite de sobreaviso)
 function heEmSA(r){if(!r.colab_id)return null;const d=r.data;const m=state.escala[d.slice(0,7)];if(!m)return null;if(isNum(getV(r.colab_id,d)))return true;if(r.inicio&&tmin(r.inicio)<480&&isNum(getV(r.colab_id,add(d,-1))))return true;return false;}
-function rHistHE(){
-  const tools=`${isAdmin()?`<label class="btn gh" title="Atualiza a base com a planilha Estudo de Horas Extras (.xlsx, aba Base)">⇪ Atualizar planilha<input type="file" accept=".xlsx,.xlsm" data-chg="heImport" style="display:none"></label>`:''}<button class="btn" data-act="copyHE">⇩ Copiar para Excel</button>`;
-  if(!HE){if(!HE_ERR&&!HE_LOADING)loadHE();return histHead(tools)+`<div class="card empty">${HE_ERR?`Não foi possível carregar as horas extras: ${esc(HE_ERR)}.<br><span class="small">Se a tabela ainda não existe, rode <b>supabase/migracao_v4.sql</b> e <b>seed_horas_extras.sql</b> no SQL Editor do Supabase.</span>`:'Carregando horas extras…'}</div>`;}
-  const all=HE.filter(r=>histSel().includes(r.data.slice(0,7)));const R=heRows(),months=histSel();
-  const cols=grpSum(all,r=>r.colaborador).map(g=>({v:g.k,l:g.k,s:fmtN(g.h)+' h'}));
-  const fil=filtrosComuns([msel('heArea','Área (planilha)',opt('heArea',grpSum(all,heArea).map(g=>({v:g.k,l:g.k,s:fmtN(g.h)+' h'}))),{all:'Todas'}),
-    msel('heCol','Colaborador',opt('heCol',cols),{all:'Todos'}),
-    msel('heCls','Classificação',opt('heCls',grpSum(all,r=>r.classificacao).map(g=>({v:g.k,l:g.k,s:fmtN(g.h)+' h'}))),{all:'Todas'}),
-    msel('heTur','Turno',opt('heTur',grpSum(all,r=>r.turno||'').map(g=>({v:g.k,l:g.k||'Não informado',s:fmtN(g.h)+' h'}))),{all:'Todos'})]).filter((x,i)=>i!==2);// área da escala não se aplica
-  const H=sum(R.map(r=>r.horas)),pes=new Set(R.map(r=>r.colaborador)),mesesCom=new Set(R.map(r=>r.data.slice(0,7))).size;
-  const byCls=grpSum(R,r=>r.classificacao),byTur=grpSum(R,r=>r.turno||''),byCol=grpSum(R,r=>r.colaborador),byMot=grpSum(R,r=>heMotivo(r.motivo));
-  const notH=sum(R.filter(r=>/Noturno|Madrugada/.test(r.turno)&&!/Semi/.test(r.turno)).map(r=>r.horas));
-  const top=byCol[0],fds=sum(R.filter(r=>!isWork(r.data)).map(r=>r.horas));
-  // cruzamento com a escala
-  const X=R.map(r=>({r,s:heEmSA(r)})).filter(x=>x.s!==null);const xIn=sum(X.filter(x=>x.s).map(x=>x.r.horas)),xOut=sum(X.filter(x=>!x.s).map(x=>x.r.horas));
-  const segs=byCls.slice(0,5).map((g,i)=>({v:g.h,c:CLS_COR[i]}));if(byCls.length>5)segs.push({v:sum(byCls.slice(5).map(g=>g.h)),c:CLS_COR[6]});
-  // evolução por mês (empilhado por turno)
-  const series=months.map(m=>{const rs=R.filter(r=>r.data.startsWith(m));const by={};rs.forEach(r=>by[r.turno||'']=(by[r.turno||'']||0)+r.horas);return{m,t:sum(rs.map(r=>r.horas)),by};});
-  const mx=Math.max(1,...series.map(s=>s.t)),avg=series.length?H/series.length:0,showV=series.length<=18,TUR=['Diurno','Semi-Noturno','Noturno','Madrugada',''];
-  const chart=`<div class="chart">${series.map(s=>`<div class="cb" title="${ymLabel(s.m)}: ${hh(s.t)}">${showV&&s.t?`<span class="vl">${fmtN(s.t)}</span>`:''}<div class="stk" style="height:${(s.t/mx*88).toFixed(1)}%">${TUR.map(t=>s.by[t]?`<i style="height:${(s.by[t]/s.t*100).toFixed(2)}%;background:${TURNO_COR[t]}" title="${t||'Não informado'}: ${hh(s.by[t])}"></i>`:'').join('')}</div></div>`).join('')}${avg?`<div class="avg" style="bottom:${(avg/mx*0.88*220).toFixed(0)}px"><span>média ${fmtN(avg)} h</span></div>`:''}</div><div class="cx">${series.map(s=>`<span>${showV||s.m.endsWith('-01')?ymShort(s.m):''}</span>`).join('')}</div><div class="lgd">${TUR.filter(t=>byTur.some(g=>g.k===t)).map(t=>`<span><i style="background:${TURNO_COR[t]}"></i>${t||'Não informado'}</span>`).join('')}</div>`;
-  // ano x mês
-  const anos=[...new Set(months.map(m=>m.slice(0,4)))].sort();const cell={};R.forEach(r=>{const k=r.data.slice(0,7);cell[k]=(cell[k]||0)+r.horas;});const cmx=Math.max(1,...Object.values(cell));
-  const ym=`<div class="tw"><table class="t hm"><thead><tr><th>Ano</th>${MES3.map(m=>`<th>${m}</th>`).join('')}<th>Total</th><th>Média/mês</th></tr></thead><tbody>${anos.map(y=>{const vs=MES3.map((_,i)=>cell[`${y}-${pad(i+1)}`]||0);const n=months.filter(m=>m.startsWith(y)).length;return `<tr><td><b>${y}</b></td>${vs.map(v=>`<td style="${v?`background:rgba(255,217,25,${(.12+v/cmx*.7).toFixed(2)});color:#2E2D39`:''}">${v?fmtN(v):''}</td>`).join('')}<td class="tot"><b>${fmtN(sum(vs))}</b></td><td class="tot">${n?fmtN(sum(vs)/n):''}</td></tr>`;}).join('')}</tbody></table></div>`;
-  const bars=(list,n,lab)=>{const m=Math.max(1,...list.slice(0,n).map(g=>g.h));return `<div class="hbars">${list.slice(0,n).map((g,i)=>`<div class="hb" title="${esc(g.k)} · ${g.n} lançamentos"><span class="nm"><b>${esc(lab?lab(g):g.k)}</b></span><span class="tr"><i style="width:${(g.h/m*100).toFixed(1)}%;background:${CLS_COR[i%CLS_COR.length]}"></i></span><b>${fmtN(g.h)} h</b></div>`).join('')||'<p class="muted">Sem lançamentos no filtro.</p>'}</div>`;};
-  const colBars=(()=>{const m=Math.max(1,...byCol.slice(0,25).map(g=>g.h));return `<div class="hbars">${byCol.slice(0,25).map(g=>{const c=g.rows[0].colab_id?colab(g.rows[0].colab_id):null;return `<div class="hb" title="${esc(g.k)} · ${g.n} lançamentos${c?'':' · fora do cadastro atual'}"><span class="nm"><b>${esc(short(g.k))}</b> <span class="muted small">${esc(c?areaShort(area(c.areaId)?.nome||''):heArea(g.rows[0]))}</span></span><span class="tr"><i style="width:${(g.h/m*100).toFixed(1)}%;background:${c?'#FFD919':'#8583A8'}"></i></span><b>${fmtN(g.h)} h</b></div>`;}).join('')||'<p class="muted">Sem lançamentos no filtro.</p>'}</div><div class="lgd"><span><i style="background:#FFD919"></i>no cadastro atual</span><span><i style="background:#8583A8"></i>não está no cadastro (desligado/outra equipe)</span></div>`;})();
-  // cruzamento por mês e por pessoa
-  const xm=months.filter(m=>state.escala[m]).map(m=>{const P=state.colaboradores.filter(c=>!ui.hSups.length||ui.hSups.includes(c.supervisaoId||''));const s=saMonth(m,P);const rs=X.filter(x=>x.r.data.startsWith(m));return{m,sa:s.t,ac:s.ac,he:sum(R.filter(r=>r.data.startsWith(m)).map(r=>r.horas)),hin:sum(rs.filter(x=>x.s).map(x=>x.r.horas)),hout:sum(rs.filter(x=>!x.s).map(x=>x.r.horas)),din:new Set(rs.filter(x=>x.s).map(x=>x.r.colab_id+x.r.data)).size};});
-  const xmT=`<div class="tw"><table class="t"><thead><tr><th>Mês</th><th style="text-align:right">Sobreaviso na escala</th><th style="text-align:right">HE justificada</th><th style="text-align:right">HE em sobreaviso</th><th style="text-align:right">HE fora do sobreaviso</th><th style="text-align:right">Dias acionados (HE)</th><th style="text-align:right">Acionados marcados ⚡</th><th style="text-align:right">HE / sobreaviso</th></tr></thead><tbody>${xm.slice().reverse().map(x=>`<tr><td><b>${ymLabel(x.m)}</b></td><td style="text-align:right">${fmtN(x.sa)} h</td><td style="text-align:right"><b>${fmtN(x.he)} h</b></td><td style="text-align:right">${fmtN(x.hin)} h</td><td style="text-align:right">${fmtN(x.hout)} h</td><td style="text-align:right">${x.din||''}</td><td style="text-align:right">${x.ac||''}${x.din>x.ac?' <span class="badge b-wa" title="Há dias com HE em sobreaviso sem a marcação de acionado na escala">verificar</span>':''}</td><td style="text-align:right">${x.sa?Math.round(x.hin/x.sa*100)+'%':'—'}</td></tr>`).join('')||`<tr><td colspan="8" class="muted">Sem escala detalhada nos meses do filtro (a escala dia a dia existe a partir de jan/2025).</td></tr>`}</tbody></table></div>`;
-  const pc=grpSum(X.map(x=>x.r),r=>r.colab_id).map(g=>{const c=colab(g.k);const ms=new Set(g.rows.map(r=>r.data.slice(0,7)));const saH=sum([...ms].map(m=>monthStat(g.k,m)?.sa||0));const hin=sum(X.filter(x=>x.s&&x.r.colab_id===g.k).map(x=>x.r.horas));return{c,he:g.h,hin,hout:g.h-hin,saH};}).filter(x=>x.c).sort((a,b)=>b.he-a.he).slice(0,20);
-  const pcT=`<div class="tw"><table class="t"><thead><tr><th>Colaborador</th><th style="text-align:right">HE (meses com escala)</th><th style="text-align:right">Em sobreaviso</th><th style="text-align:right">Fora do sobreaviso</th><th style="text-align:right">Sobreaviso nesses meses</th></tr></thead><tbody>${pc.map(x=>`<tr><td><b>${esc(x.c.nome)}</b> <span class="muted small">${esc(areaShort(area(x.c.areaId)?.nome||''))}</span></td><td style="text-align:right"><b>${fmtN(x.he)} h</b></td><td style="text-align:right">${fmtN(x.hin)} h</td><td style="text-align:right">${x.hout>0?`<span class="badge ${x.hout>x.hin?'b-wa':''}">${fmtN(x.hout)} h</span>`:'—'}</td><td style="text-align:right">${fmtN(x.saH)} h</td></tr>`).join('')||'<tr><td colspan="5" class="muted">Sem dados cruzáveis no filtro.</td></tr>'}</tbody></table></div>`;
-  const fCount=['heArea','heCol','heCls','heTur','hSups'].filter(k=>ui[k].length).length;
-  return histHead(tools)+fbar(fil,fCount?`<button class="btn sm gh" data-act="heLimpar">Limpar filtros (${fCount})</button>`:'')+
-  `<div class="breadcrumb"><span>Controle manual de justificativa de horas (planilha Estudo de Horas Extras) · 2023 em diante</span><span class="r">${periodoLabel(months)} · ${R.length} lançamentos · base com ${HE.length} lançamentos</span></div>`+
-  `<div class="esc-titulo">Resultado consolidado <b>Horas extras justificadas — ${ui.heArea.length===1?esc(ui.heArea[0]):'Consolidado'}</b></div>`+
-  hub([hubIt('clock','Horas extras',fmtN(H)+' h',`${R.length} lançamentos · média de ${fmtN(months.length?H/months.length:0)} h/mês`),
-       hubIt('users','Colaboradores',pes.size,`${fmtN(pes.size?H/pes.size:0)} h por pessoa · ${mesesCom} meses com lançamento`),
-       hubIt('moon','Noturno e madrugada',fmtN(notH)+' h',H?`${Math.round(notH/H*100)}% das horas · ${fmtN(fds)} h em fins de semana/feriados`:'')],
-      {segs,k:'Por classificação',v:byCls[0]?Math.round(byCls[0].h/(H||1)*100)+'%':'—',s:byCls[0]?esc(byCls[0].k):'sem lançamentos',pill:''},
-      [hubIt('trend','Maior volume',top?esc(short(top.k)):'—',top?`${fmtN(top.h)} h · ${top.n} lançamentos`:''),
-       hubIt('bolt','HE em sobreaviso',fmtN(xIn)+' h',X.length?`${Math.round(xIn/((xIn+xOut)||1)*100)}% da HE cruzável caiu em dia de sobreaviso`:'cruzamento a partir de jan/2025',{cls:''}),
-       hubIt('alert','HE fora do sobreaviso',fmtN(xOut)+' h','dias sem sobreaviso lançado na escala',{cls:xOut>xIn?'at':''})])+
-  secdiv(1,'Evolução mês a mês','horas extras justificadas por mês, por turno de término')+`<div class="card"><h3>Horas extras por mês</h3>${chart}</div>`+
-  secdiv(2,'Comparativo por ano','soma de horas por mês em cada ano escolhido no filtro')+`<div class="card"><h3>Ano x mês (horas)</h3>${ym}</div>`+
-  secdiv(3,'Quem e por quê','colaboradores, classificações e motivos mais frequentes')+`<div class="card"><h3>Por colaborador · top 25</h3>${colBars}</div><div class="cols"><div class="card"><h3>Por classificação</h3>${bars(byCls,10)}</div><div class="card"><h3>Motivos mais frequentes</h3>${bars(byMot,10,g=>g.k.length>60?g.k.slice(0,60)+'…':g.k)}</div></div>`+
-  secdiv(4,'Cruzamento com a escala','HE justificada x sobreaviso lançado na ferramenta (mesmo dia, ou madrugada depois de uma noite de sobreaviso)')+`<div class="card"><h3>Por mês</h3>${xmT}<p class="hint">“Dias acionados (HE)” conta pessoa + dia com HE em sobreaviso; quando é maior que os acionamentos marcados com ⚡ na escala, falta marcar acionamento (e a folga do dia seguinte).</p></div><div class="card"><h3>Por colaborador · top 20</h3>${pcT}</div>`;
-}
 ACT.heLimpar=()=>{['heArea','heCol','heCls','heTur','hSups'].forEach(k=>ui[k]=[]);persistUI();render();};
 ACT.copyHE=()=>{const L=[['Data','Colaborador','Função','Motivo','Início','Término','Horas','Classificação','Turno','Cidade','Área (planilha)','Em sobreaviso'].join('\t')];heRows().forEach(r=>{const s=heEmSA(r);L.push([fmt(r.data),r.colaborador,r.funcao,String(r.motivo||'').replace(/\s+/g,' '),r.inicio,r.termino,String(r.horas).replace('.',','),r.classificacao,r.turno,r.cidade,heArea(r),s===null?'':s?'sim':'não'].join('\t'));});copyText(L.join('\n'));};
 
@@ -1058,7 +1013,7 @@ ACT.heImport=async el=>{if(!isAdmin())return deny();const f=el.files&&el.files[0
     if(!out.length){toast('Nenhum lançamento válido (2023 em diante) encontrado na aba Base.');return;}
     const yrs={};out.forEach(o=>{const y=o.data.slice(0,4);yrs[y]=(yrs[y]||0)+o.horas;});
     confirmBox('Atualizar horas extras?',`Foram lidos <b>${out.length}</b> lançamentos (${Object.entries(yrs).map(([y,h])=>`${y}: ${fmtN(h)} h`).join(' · ')}). A base atual de 2023 em diante (${HE?HE.length:0} lançamentos) será substituída.`,'Substituir base',async()=>{
-      toast('Gravando…');let r=await sb.from('horas_extras').delete().gte('data','2023-01-01');if(r.error)return toast(r.error.message);
+      toast('Gravando…');const J={};(HE||[]).filter(x=>x.justificativa).forEach(x=>J[x.data+'|'+nrm(x.colaborador)+'|'+x.inicio]=x);out.forEach(o=>{const j=J[o.data+'|'+nrm(o.colaborador)+'|'+o.inicio];if(j)['ba','estacao','justificativa','justificado_por','justificado_nome','justificado_em'].forEach(k=>o[k]=j[k]);});let r=await sb.from('horas_extras').delete().gte('data','2023-01-01');if(r.error)return toast(r.error.message);
       for(let i=0;i<out.length;i+=500){r=await sb.from('horas_extras').insert(out.slice(i,i+500));if(r.error)return toast('Erro ao gravar: '+r.error.message);}
       HE=null;await loadHE();toast(`Base de horas extras atualizada · ${out.length} lançamentos`);});
   }catch(e){toast('Erro ao ler a planilha: '+(e.message||e));}};
@@ -1102,6 +1057,188 @@ Object.assign(ACT,{
   metaAdd:()=>{if(!isAdmin())return deny();const ms=metas();ms.push({desde:ymAdd(curYm(),1),valor:ms[ms.length-1].valor});state.config.metasSobreaviso=ms;touch();render();},
   metaDel:el=>{if(!isAdmin())return deny();const ms=metas();ms.splice(+el.dataset.i,1);state.config.metasSobreaviso=ms;touch();render();}
 });
+
+
+/* =====================================================================
+   VERSÃO 5 · horas extras: banco de horas x pago, sobreaviso pago,
+   justificativas (BA / ESTAÇÃO / MOTIVO) e detalhamento
+   ===================================================================== */
+const DSEMX=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+// destino da HE: seg–sáb vai para o banco de horas; domingo e feriado é pago 100%
+const heDest=r=>dow(r.data)===0||isHol(r.data)?'pago':'bh';
+const DEST={bh:['Banco de horas','b-fe'],pago:['Pago 100%','b-ok']};
+// texto da justificativa (a nova, se houver; senão o motivo da planilha)
+const heJust=r=>r.justificativa?[r.ba,r.estacao,r.justificativa].filter(Boolean).join(' / '):String(r.motivo||'');
+// fora do padrão BA / ESTAÇÃO / MOTIVO: sem número de BA/JM/chamado e sem código de estação
+const padraoOk=m=>/\d{5,}/.test(m)||/\b[A-Z]{2,4}_[A-Z0-9.]{2,}/i.test(m)||/\b(JM|BRBN|SPBM|SPBE)\b/i.test(m);
+const hePend=r=>!r.justificativa&&(!padraoOk(String(r.motivo||''))||r.classificacao==='Não classificado'||r.cidade==='Corrigir Lançamento');
+const pendWhy=r=>[!padraoOk(String(r.motivo||''))&&'sem número de BA/JM/chamado nem código de estação',r.classificacao==='Não classificado'&&'sem classificação',r.cidade==='Corrigir Lançamento'&&'planilha marcou “Corrigir lançamento”'].filter(Boolean).join(' · ');
+const canJust=r=>isAdmin()||(ROLE()==='supervisor'&&!!r.colab_id&&canEditColab(r.colab_id));
+// dia de sobreaviso a que a HE pertence (mesmo dia, ou madrugada após noite de sobreaviso); '' = fora; null = sem escala
+function hePl(r){if(!r.colab_id||!state.escala[r.data.slice(0,7)])return null;const v=getV(r.colab_id,r.data);
+  if(isNum(v))return{t:'SA',d:r.data};if(v==='J3')return{t:'J3',d:r.data};
+  const p=add(r.data,-1);if(r.inicio&&tmin(r.inicio)<480&&isNum(getV(r.colab_id,p)))return{t:'SA',d:p};return{t:'',d:null};}
+// HE (todas, sem filtro de classificação/turno) somada por pessoa + dia de sobreaviso
+function heSAIndex(){const m={};(HE||[]).forEach(r=>{const p=hePl(r);if(p&&p.t==='SA'){const k=r.colab_id+'|'+p.d;m[k]=(m[k]||0)+r.horas;}});return m;}
+// sobreaviso pago = horas de sobreaviso do dia menos as horas de HE feitas nele
+function saPagoCalc(people,months,idx){const out={lanc:0,troca:0,pago:0,byM:{},byC:{}};
+  months.filter(m=>state.escala[m]).forEach(m=>{const mm=state.escala[m];const bm=out.byM[m]={lanc:0,troca:0,pago:0};
+    people.forEach(c=>{const cells=mm[c.id];if(!cells)return;const bc=out.byC[c.id]=out.byC[c.id]||{lanc:0,troca:0,pago:0};
+      for(const dd in cells){const v=cells[dd];if(!isNum(v))continue;const h=Math.min(v,idx[c.id+'|'+m+'-'+dd]||0);
+        [out,bm,bc].forEach(o=>{o.lanc+=v;o.troca+=h;o.pago+=v-h;});}});});return out;}
+function hePeople(){const ids=ui.heCol.length?new Set(HE.filter(r=>ui.heCol.includes(r.colaborador)).map(r=>r.colab_id).filter(Boolean)):null;
+  const inA=ui.heArea.length?new Set(HE.filter(r=>ui.heArea.includes(heArea(r))).map(r=>r.colab_id).filter(Boolean)):null;
+  return state.colaboradores.filter(c=>inSupSel(c)&&(!ids||ids.has(c.id))&&(!inA||inA.has(c.id)));}
+
+function rHistHE(){
+  const tools=`${isAdmin()?`<label class="btn gh" title="Atualiza a base com a planilha Estudo de Horas Extras (.xlsx, aba Base). As justificativas já feitas são mantidas.">⇪ Atualizar planilha<input type="file" accept=".xlsx,.xlsm" data-chg="heImport" style="display:none"></label>`:''}<button class="btn" data-act="copyHE">⇩ Copiar para Excel</button>`;
+  if(!HE){if(!HE_ERR&&!HE_LOADING)loadHE();return histHead(tools)+`<div class="card empty">${HE_ERR?`Não foi possível carregar as horas extras: ${esc(HE_ERR)}.<br><span class="small">Se a tabela ainda não existe, rode os arquivos <b>v4_passo1</b> a <b>v4_passo5</b> no SQL Editor do Supabase.</span>`:'Carregando horas extras…'}</div>`;}
+  const months=histSel(),all=HE.filter(r=>months.includes(r.data.slice(0,7)));const R=heRows();
+  const fil=filtrosComuns([msel('heArea','Área (planilha)',opt('heArea',grpSum(all,heArea).map(g=>({v:g.k,l:g.k,s:fmtN(g.h)+' h'}))),{all:'Todas'}),
+    msel('heCol','Colaborador',opt('heCol',grpSum(all,r=>r.colaborador).map(g=>({v:g.k,l:g.k,s:fmtN(g.h)+' h'}))),{all:'Todos'}),
+    msel('heCls','Classificação',opt('heCls',grpSum(all,r=>r.classificacao).map(g=>({v:g.k,l:g.k,s:fmtN(g.h)+' h'}))),{all:'Todas'}),
+    msel('heTur','Turno',opt('heTur',grpSum(all,r=>r.turno||'').map(g=>({v:g.k,l:g.k||'Não informado',s:fmtN(g.h)+' h'}))),{all:'Todos'})]).filter((x,i)=>i!==2);
+  // números principais
+  const H=sum(R.map(r=>r.horas)),BH=sum(R.filter(r=>heDest(r)==='bh').map(r=>r.horas)),PG=H-BH;
+  const X=R.map(r=>({r,p:hePl(r)})).filter(x=>x.p);const xIn=sum(X.filter(x=>x.p.t).map(x=>x.r.horas)),xOut=sum(X.filter(x=>!x.p.t).map(x=>x.r.horas)),xT=xIn+xOut;
+  const idx=heSAIndex(),people=hePeople(),SP=saPagoCalc(people,months,idx);
+  const pend=R.filter(hePend),pendH=sum(pend.map(r=>r.horas));
+  const byCls=grpSum(R,r=>r.classificacao),byTur=grpSum(R,r=>r.turno||''),byCol=grpSum(R,r=>r.colaborador),byMot=grpSum(R,r=>heMotivo(heJust(r)));
+  // gráfico: banco de horas x pago x sobreaviso pago por mês
+  const pm=months.map(m=>{const rs=R.filter(r=>r.data.startsWith(m));const bh=sum(rs.filter(r=>heDest(r)==='bh').map(r=>r.horas)),pg=sum(rs.filter(r=>heDest(r)==='pago').map(r=>r.horas));const s=SP.byM[m]||{lanc:0,troca:0,pago:0};
+    const xi=sum(rs.map(r=>{const p=hePl(r);return p&&p.t?r.horas:0;})),xo=sum(rs.map(r=>{const p=hePl(r);return p&&!p.t?r.horas:0;}));return{m,bh,pg,he:bh+pg,sa:s,xi,xo};});
+  const mx=Math.max(1,...pm.map(x=>x.bh+x.pg+x.sa.pago)),showV=pm.length<=18,COR={bh:'#85A7FF',pg:'#ef4444',sp:'#C0A1FF'};
+  const chartP=`<div class="chart">${pm.map(x=>{const t=x.bh+x.pg+x.sa.pago;return `<div class="cb" title="${ymLabel(x.m)} · banco de horas ${hh(x.bh)} · pago 100% ${hh(x.pg)} · sobreaviso pago ${fmtN(x.sa.pago)} h">${showV&&t?`<span class="vl">${fmtN(t)}</span>`:''}<div class="stk" style="height:${(t/mx*88).toFixed(1)}%">${t?[['bh',x.bh],['pg',x.pg],['sp',x.sa.pago]].map(([k,v])=>v?`<i style="height:${(v/t*100).toFixed(2)}%;background:${COR[k]}"></i>`:'').join(''):''}</div></div>`;}).join('')}</div><div class="cx">${pm.map(x=>`<span>${showV||x.m.endsWith('-01')?ymShort(x.m):''}</span>`).join('')}</div><div class="lgd"><span><i style="background:${COR.bh}"></i>HE seg–sáb → banco de horas</span><span><i style="background:${COR.pg}"></i>HE domingo/feriado → pago 100%</span><span><i style="background:${COR.sp}"></i>sobreaviso pago (sem HE no período)</span><span class="muted">sobreaviso calculado a partir de jan/2025 (escala dia a dia)</span></div>`;
+  const tP=`<div class="tw"><table class="t"><thead><tr><th>Mês</th><th style="text-align:right">HE total</th><th style="text-align:right">Banco de horas</th><th style="text-align:right">Pago 100%</th><th style="text-align:right">Sobreaviso lançado</th><th style="text-align:right">Trocado por HE</th><th style="text-align:right">Sobreaviso pago</th><th style="text-align:right">HE no plantão</th><th style="text-align:right">HE fora</th></tr></thead><tbody>${pm.slice().reverse().map(x=>{const g=state.escala[x.m];const xt=x.xi+x.xo;return `<tr><td><b>${ymLabel(x.m)}</b></td><td style="text-align:right"><b>${fmtN(x.he)} h</b></td><td style="text-align:right">${fmtN(x.bh)} h</td><td style="text-align:right">${fmtN(x.pg)} h</td><td style="text-align:right">${g?fmtN(x.sa.lanc)+' h':'—'}</td><td style="text-align:right">${g?fmtN(x.sa.troca)+' h':'—'}</td><td style="text-align:right">${g?`<b>${fmtN(x.sa.pago)} h</b>`:'—'}</td><td style="text-align:right">${xt?Math.round(x.xi/xt*100)+'%':'—'}</td><td style="text-align:right">${xt?Math.round(x.xo/xt*100)+'%':'—'}</td></tr>`;}).join('')}</tbody></table></div>`;
+  // evolução por turno, ano x mês, rankings
+  const TUR=['Diurno','Semi-Noturno','Noturno','Madrugada',''];const series=months.map(m=>{const rs=R.filter(r=>r.data.startsWith(m));const by={};rs.forEach(r=>by[r.turno||'']=(by[r.turno||'']||0)+r.horas);return{m,t:sum(rs.map(r=>r.horas)),by};});
+  const mx2=Math.max(1,...series.map(s=>s.t)),avg=series.length?H/series.length:0;
+  const chart=`<div class="chart">${series.map(s=>`<div class="cb" title="${ymLabel(s.m)}: ${hh(s.t)}">${showV&&s.t?`<span class="vl">${fmtN(s.t)}</span>`:''}<div class="stk" style="height:${(s.t/mx2*88).toFixed(1)}%">${TUR.map(t=>s.by[t]?`<i style="height:${(s.by[t]/s.t*100).toFixed(2)}%;background:${TURNO_COR[t]}" title="${t||'Não informado'}: ${hh(s.by[t])}"></i>`:'').join('')}</div></div>`).join('')}${avg?`<div class="avg" style="bottom:${(avg/mx2*0.88*220).toFixed(0)}px"><span>média ${fmtN(avg)} h</span></div>`:''}</div><div class="cx">${series.map(s=>`<span>${showV||s.m.endsWith('-01')?ymShort(s.m):''}</span>`).join('')}</div><div class="lgd">${TUR.filter(t=>byTur.some(g=>g.k===t)).map(t=>`<span><i style="background:${TURNO_COR[t]}"></i>${t||'Não informado'}</span>`).join('')}</div>`;
+  const anos=[...new Set(months.map(m=>m.slice(0,4)))].sort();const cell={};R.forEach(r=>{const k=r.data.slice(0,7);cell[k]=(cell[k]||0)+r.horas;});const cmx=Math.max(1,...Object.values(cell));
+  const ymT=`<div class="tw"><table class="t hm"><thead><tr><th>Ano</th>${MES3.map(m=>`<th>${m}</th>`).join('')}<th>Total</th><th>Média/mês</th></tr></thead><tbody>${anos.map(y=>{const vs=MES3.map((_,i)=>cell[`${y}-${pad(i+1)}`]||0);const n=months.filter(m=>m.startsWith(y)).length;return `<tr><td><b>${y}</b></td>${vs.map(v=>`<td style="${v?`background:rgba(255,217,25,${(.12+v/cmx*.7).toFixed(2)});color:#2E2D39`:''}">${v?fmtN(v):''}</td>`).join('')}<td class="tot"><b>${fmtN(sum(vs))}</b></td><td class="tot">${n?fmtN(sum(vs)/n):''}</td></tr>`;}).join('')}</tbody></table></div>`;
+  const bars=(list,n,lab)=>{const m=Math.max(1,...list.slice(0,n).map(g=>g.h));return `<div class="hbars">${list.slice(0,n).map((g,i)=>`<div class="hb" title="${esc(g.k)} · ${g.n} lançamentos"><span class="nm"><b>${esc(lab?lab(g):g.k)}</b></span><span class="tr"><i style="width:${(g.h/m*100).toFixed(1)}%;background:${CLS_COR[i%CLS_COR.length]}"></i></span><b>${fmtN(g.h)} h</b></div>`).join('')||'<p class="muted">Sem lançamentos no filtro.</p>'}</div>`;};
+  const colBars=(()=>{const m=Math.max(1,...byCol.slice(0,25).map(g=>g.h));return `<div class="hbars">${byCol.slice(0,25).map(g=>{const c=g.rows[0].colab_id?colab(g.rows[0].colab_id):null;const bh=sum(g.rows.filter(r=>heDest(r)==='bh').map(r=>r.horas));return `<div class="hb" title="${esc(g.k)} · ${g.n} lançamentos · banco de horas ${fmtN(bh)} h · pago ${fmtN(g.h-bh)} h${c?'':' · fora do cadastro atual'}"><span class="nm"><b>${esc(short(g.k))}</b> <span class="muted small">${esc(c?areaShort(area(c.areaId)?.nome||''):heArea(g.rows[0]))}</span></span><span class="tr"><i style="width:${(bh/m*100).toFixed(1)}%;background:${COR.bh}"></i><i style="left:${(bh/m*100).toFixed(1)}%;width:${((g.h-bh)/m*100).toFixed(1)}%;background:${COR.pg}"></i></span><b>${fmtN(g.h)} h</b></div>`;}).join('')||'<p class="muted">Sem lançamentos no filtro.</p>'}</div><div class="lgd"><span><i style="background:${COR.bh}"></i>banco de horas</span><span><i style="background:${COR.pg}"></i>pago 100%</span></div>`;})();
+  // por colaborador: BH, pago, sobreaviso pago
+  const pc=people.map(c=>{const rs=R.filter(r=>r.colab_id===c.id);const bh=sum(rs.filter(r=>heDest(r)==='bh').map(r=>r.horas)),pg=sum(rs.filter(r=>heDest(r)==='pago').map(r=>r.horas));const s=SP.byC[c.id]||{lanc:0,troca:0,pago:0};const xi=sum(rs.map(r=>{const p=hePl(r);return p&&p.t?r.horas:0;})),xo=sum(rs.map(r=>{const p=hePl(r);return p&&!p.t?r.horas:0;}));return{c,bh,pg,he:bh+pg,s,xi,xo,pend:rs.filter(hePend).length};}).filter(x=>x.he||x.s.lanc).sort((a,b)=>(b.he+b.s.pago)-(a.he+a.s.pago));
+  const pcT=`<div class="tw"><table class="t"><thead><tr><th>Colaborador</th><th style="text-align:right">HE</th><th style="text-align:right">Banco de horas</th><th style="text-align:right">Pago 100%</th><th style="text-align:right">Sobreaviso lançado</th><th style="text-align:right">Sobreaviso pago</th><th style="text-align:right">HE no plantão</th><th style="text-align:right">HE fora</th><th style="text-align:right">Fora do padrão</th></tr></thead><tbody>${pc.map(x=>`<tr><td><b>${esc(x.c.nome)}</b> <span class="muted small">${esc(areaShort(area(x.c.areaId)?.nome||''))}</span></td><td style="text-align:right"><b>${fmtN(x.he)} h</b></td><td style="text-align:right">${fmtN(x.bh)} h</td><td style="text-align:right">${fmtN(x.pg)} h</td><td style="text-align:right">${fmtN(x.s.lanc)} h</td><td style="text-align:right"><b>${fmtN(x.s.pago)} h</b></td><td style="text-align:right">${fmtN(x.xi)} h</td><td style="text-align:right">${x.xo?`<span class="badge ${x.xo>x.xi?'b-wa':''}">${fmtN(x.xo)} h</span>`:'—'}</td><td style="text-align:right">${x.pend?`<span class="badge b-er">${x.pend}</span>`:''}</td></tr>`).join('')||'<tr><td colspan="9" class="muted">Sem dados no filtro.</td></tr>'}</tbody></table></div>`;
+  // detalhamento
+  const q=nrm(ui.heQ||'');let D=R.slice();if(ui.hePend)D=D.filter(hePend);if(q)D=D.filter(r=>nrm(r.colaborador+' '+heJust(r)+' '+r.motivo).includes(q));
+  D.sort((a,b)=>cmp(b.data,a.data)||cmp(b.inicio,a.inicio));const lim=ui.heLim||150;
+  const det=`<div class="bar"><div class="seg2"><button class="${ui.hePend?'':'on'}" data-act="hePend" data-v="0">Todos (${R.length})</button><button class="${ui.hePend?'on':''}" data-act="hePend" data-v="1">Fora do padrão (${pend.length})</button></div><input id="heq" data-uiq="heQ" placeholder="Buscar colaborador, BA, estação ou motivo…" value="${esc(ui.heQ||'')}" style="flex:1;min-width:220px;max-width:420px"><span class="sp"></span><span class="muted small">${D.length} lançamentos · ${fmtN(sum(D.map(r=>r.horas)))} h</span></div>
+   <div class="tw"><table class="t det"><thead><tr><th>Data</th><th>Dia</th><th>Colaborador</th><th>Período</th><th style="text-align:right">Horas</th><th>Plantão</th><th>Destino</th><th>Justificativa (BA / estação / motivo)</th><th></th></tr></thead><tbody>${D.slice(0,lim).map(r=>{const p=hePl(r),pd=hePend(r),de=DEST[heDest(r)];
+     return `<tr class="${pd?'pend':''}"><td class="small" style="white-space:nowrap">${fmt(r.data)}</td><td class="small">${DSEMX[dow(r.data)]}${isHol(r.data)?` <span class="badge b-wa" title="${esc(holName(r.data))}">feriado</span>`:''}</td><td><b>${esc(short(r.colaborador))}</b><div class="muted small">${esc(r.classificacao)}</div></td><td class="small" style="white-space:nowrap">${esc(r.inicio||'?')}–${esc(r.termino||'?')}<div class="muted">${esc(r.turno||'')}</div></td><td style="text-align:right"><b>${hh(r.horas)}</b></td><td>${p===null?'<span class="muted small">—</span>':p.t==='SA'?`<span class="badge b-sa" title="sobreaviso de ${fmtS(p.d)}">sobreaviso</span>`:p.t==='J3'?'<span class="badge b-j3">J3</span>':'<span class="badge">fora</span>'}</td><td><span class="badge ${de[1]}">${de[0]}</span></td><td class="small jus">${pd?`<span class="badge b-er" title="${esc(pendWhy(r))}">fora do padrão</span> `:''}${esc(heJust(r))}${r.justificativa?`<div class="muted">justificado por ${esc(r.justificado_nome||'')}${r.justificado_em?' em '+fmt(String(r.justificado_em).slice(0,10)):''} · original: ${esc(r.motivo)}</div>`:''}</td><td>${canJust(r)?`<button class="btn sm ${pd?'pri':'gh'}" data-act="heJus" data-id="${r.id}">${r.justificativa?'Editar':'Justificar'}</button>`:''}</td></tr>`;}).join('')||'<tr><td colspan="9" class="muted">Nenhum lançamento para os filtros escolhidos.</td></tr>'}</tbody></table></div>${D.length>lim?`<div class="bar" style="margin-top:10px"><button class="btn" data-act="heMais">Mostrar mais ${Math.min(150,D.length-lim)} de ${D.length-lim}</button></div>`:''}`;
+  const fCount=['heArea','heCol','heCls','heTur','hSups'].filter(k=>ui[k].length).length;
+  const pp=xT?Math.round(xIn/xT*100):0;
+  return histHead(tools)+fbar(fil,fCount?`<button class="btn sm gh" data-act="heLimpar">Limpar filtros (${fCount})</button>`:'')+
+  `<div class="breadcrumb"><span>Controle de justificativa de horas (planilha Estudo de Horas Extras) · 2023 em diante</span><span class="r">${periodoLabel(months)} · ${R.length} lançamentos · base com ${HE.length}</span></div>`+
+  `<div class="metabar"><b>Regra de pagamento</b><span class="pill p-at" style="background:#85A7FF;color:#000">HE seg–sáb → banco de horas</span><span class="pill p-er">HE domingo e feriado → pago 100%</span><span class="pill" style="background:#C0A1FF;color:#000">sobreaviso pago = sobreaviso lançado − HE feita nele</span></div>`+
+  `<div class="esc-titulo">Resultado consolidado <b>Horas extras — ${ui.heArea.length===1?esc(ui.heArea[0]):ui.heCol.length===1?esc(ui.heCol[0]):'Consolidado'}</b></div>`+
+  hub([hubIt('clock','Total de horas extras',fmtN(H)+' h',`${R.length} lançamentos · média de ${fmtN(months.length?H/months.length:0)} h/mês`),
+       hubIt('doc','Banco de horas',fmtN(BH)+' h',H?`${Math.round(BH/H*100)}% das HE · feitas de segunda a sábado`:''),
+       hubIt('flag','Pagas 100%',fmtN(PG)+' h',H?`${Math.round(PG/H*100)}% das HE · domingos e feriados`:'')],
+      {segs:[{v:xIn,c:'#FFD919'},{v:xOut,c:'#8583A8'}],k:'HE no plantão / sobreaviso',v:xT?pp+'%':'—',s:xT?`${fmtN(xIn)} h no plantão · ${fmtN(xOut)} h fora (${100-pp}%)`:'cruzamento a partir de jan/2025',pill:''},
+      [hubIt('shield','Sobreaviso pago',fmtN(SP.pago)+' h',SP.lanc?`de ${fmtN(SP.lanc)} h lançadas na escala`:'sem escala dia a dia no período'),
+       hubIt('bolt','Sobreaviso trocado por HE',fmtN(SP.troca)+' h',SP.lanc?`${Math.round(SP.troca/SP.lanc*100)}% do sobreaviso virou HE (BH ou pago)`:''),
+       hubIt('alert','Fora do padrão',pend.length,pend.length?`${fmtN(pendH)} h sem BA / estação / motivo — clique para ver`:'todas no padrão',{cls:pend.length?'er':'ok',act:'heVerPend'})])+
+  secdiv(1,'Banco de horas, pagamento e sobreaviso','o que foi para o banco de horas, o que foi pago e quanto do sobreaviso foi pago por mês')+`<div class="card"><h3>Horas por destino · mês a mês</h3>${chartP}</div><div class="card"><h3>Detalhamento por mês</h3>${tP}</div>`+
+  secdiv(2,'Evolução por turno','horas extras justificadas por mês, por turno de término')+`<div class="card"><h3>Horas extras por mês</h3>${chart}</div>`+
+  secdiv(3,'Comparativo por ano','soma de horas por mês em cada ano escolhido no filtro')+`<div class="card"><h3>Ano x mês (horas)</h3>${ymT}</div>`+
+  secdiv(4,'Quem e por quê','colaboradores, classificações e motivos mais frequentes')+`<div class="card"><h3>Por colaborador · top 25</h3>${colBars}</div><div class="cols"><div class="card"><h3>Por classificação</h3>${bars(byCls,10)}</div><div class="card"><h3>Motivos mais frequentes</h3>${bars(byMot,10,g=>g.k.length>60?g.k.slice(0,60)+'…':g.k)}</div></div>`+
+  secdiv(5,'Por colaborador','banco de horas, pagamento, sobreaviso pago e HE dentro e fora do plantão')+`<div class="card"><h3>Resumo por colaborador</h3>${pcT}</div>`+
+  `<div id="he-det"></div>`+secdiv(6,'Detalhamento das justificativas','cada lançamento com dia da semana, período, horas e justificativa · os fora do padrão BA / ESTAÇÃO / MOTIVO ficam em destaque')+`<div class="card"><h3>Lançamentos · ${periodoLabel(months)}</h3>${det}</div>`;
+}
+Object.assign(ACT,{
+  hePend:el=>{ui.hePend=el.dataset.v==='1';ui.heLim=150;persistUI();render();},
+  heVerPend:()=>{ui.hePend=true;ui.heLim=150;render();const e=document.getElementById('he-det');if(e)e.scrollIntoView({behavior:'smooth'});},
+  heMais:()=>{ui.heLim=(ui.heLim||150)+150;render();},
+  heJus:el=>{const r=(HE||[]).find(x=>String(x.id)===el.dataset.id);if(!r)return;if(!canJust(r))return deny();openJust(r);}
+});
+function openJust(r){
+  const m=String(r.motivo||'');const baG=(m.match(/\b(BA|JM)[\s:\-]*\d{6,}/i)||m.match(/\d{8,}/)||[''])[0];const stG=(m.match(/\b[A-Z]{2,4}_[A-Z0-9.]{2,}/i)||[''])[0];
+  openModal({render:()=>`${mHead('Justificar hora extra')}<div class="mb"><div class="jus-info"><b>${esc(r.colaborador)}</b> · ${DSEMX[dow(r.data)]}, ${fmt(r.data)} · ${esc(r.inicio)}–${esc(r.termino)} · <b>${hh(r.horas)}</b> · ${DEST[heDest(r)][0]}<div class="muted small">Lançado na planilha: “${esc(m)}” · ${esc(r.classificacao)}</div></div>
+    <p class="hint">Padrão: <b>BA / ESTAÇÃO / MOTIVO</b>. Ex.: BA 212257605 / SPO_BRS / Falta de AC na estação, troca de retificador.</p>
+    <div class="fg"><label>BA, JM ou chamado<input id="j_ba" value="${esc(r.ba||baG)}" placeholder="BA 212257605"></label><label>Estação<input id="j_st" value="${esc(r.estacao||stG)}" placeholder="SPO_BRS"></label></div>
+    <label style="display:block;margin-top:10px">Motivo<textarea id="j_mo" style="width:100%;height:80px" placeholder="O que foi feito e por quê">${esc(r.justificativa||'')}</textarea></label>
+    <div class="hint" id="j_pv"></div></div><div class="mf"><span class="sp"></span><button class="btn" data-act="close">Cancelar</button><button class="btn pri" data-act="ok">Salvar justificativa</button></div>`,
+  input(){const e=document.getElementById('j_pv');if(e)e.textContent='Vai ficar: '+[val('j_ba').trim(),val('j_st').trim(),val('j_mo').trim()].filter(Boolean).join(' / ');},
+  async act(a){if(a==='close')return closeModal();if(a!=='ok')return;
+    const f={ba:val('j_ba').trim(),estacao:val('j_st').trim(),justificativa:val('j_mo').trim()};
+    if(!f.justificativa)return toast('Descreva o motivo');if(!f.ba&&!f.estacao)return toast('Informe o BA/JM ou a estação');
+    f.justificado_nome=PROFILE?.nome||PROFILE?.email||'';f.justificado_em=new Date().toISOString();f.justificado_por=PROFILE?.id||null;
+    const{error}=await sb.from('horas_extras').update(f).eq('id',r.id);if(error)return toast('Não foi possível salvar: '+error.message);
+    Object.assign(r,f);closeModal();render();toast('Justificativa salva');}});
+}
+ACT.copyHE=()=>{const L=[['Data','Dia da semana','Colaborador','Início','Término','Horas','Turno','Classificação','Plantão','Destino','Justificativa','Fora do padrão','Motivo original','Área (planilha)'].join('\t')];
+  heRows().forEach(r=>{const p=hePl(r);L.push([fmt(r.data),DSEMX[dow(r.data)],r.colaborador,r.inicio,r.termino,String(r.horas).replace('.',','),r.turno,r.classificacao,p===null?'':p.t==='SA'?'sobreaviso':p.t==='J3'?'J3':'fora',DEST[heDest(r)][0],heJust(r).replace(/\s+/g,' '),hePend(r)?'sim':'',String(r.motivo||'').replace(/\s+/g,' '),heArea(r)].join('\t'));});copyText(L.join('\n'));};
+
+/* =====================================================================
+   REGRAS PERSONALIZADAS DA ESCALA (admin)
+   ===================================================================== */
+const REG_TIPOS={
+  maxMes:'Limite de plantões no mês',
+  intervalo:'Intervalo mínimo entre plantões',
+  naoJuntos:'Não escalar no mesmo fim de semana',
+  bloqueio:'Restrição de colaborador',
+  texto:'Orientação (texto livre)'};
+const REG_REGIME={todos:'qualquer plantão',J3:'J3',SA:'sobreaviso'};
+const regras=()=>Array.isArray(state.config.regrasEscala)?state.config.regrasEscala:[];
+const regrasAtivas=()=>regras().filter(r=>r.ativa!==false);
+const cNome=id=>colab(id)?short(colab(id).nome):'(colaborador removido)';
+function regraDesc(r){const ar=r.area?` · ${areaShort(area(r.area)?.nome||'área removida')}`:'';
+  if(r.tipo==='maxMes')return `No máximo ${r.n} fim(ns) de semana de ${REG_REGIME[r.regime||'todos']} por pessoa no mês${ar}`;
+  if(r.tipo==='intervalo')return `Mínimo de ${r.dias} dias entre um plantão de fim de semana e o próximo da mesma pessoa${ar}`;
+  if(r.tipo==='naoJuntos')return `${cNome(r.c1)} e ${cNome(r.c2)} não ficam de plantão no mesmo fim de semana/feriado`;
+  if(r.tipo==='bloqueio'){const p=[];if((r.dows||[]).length)p.push('às '+r.dows.map(d=>DSEMX[d].toLowerCase()).join(', '));if(r.de)p.push(`de ${fmt(r.de)}${r.ate?' a '+fmt(r.ate):' em diante'}`);return `${cNome(r.c)} sem ${REG_REGIME[r.regime||'todos']} ${p.join(' e ')||'(defina dias ou período)'}`;}
+  return r.texto||'';}
+// usado pelo gerador: a pessoa pode pegar este plantão sem quebrar uma regra?
+function ruleOk(c,t,b,days,h,soHard){for(const r of regrasAtivas()){if(r.area&&c.areaId!==r.area)continue;if(soHard&&(r.tipo==='maxMes'||r.tipo==='intervalo'))continue;
+  if(r.tipo==='maxMes'&&b&&h&&(r.regime==='todos'||!r.regime||r.regime===t)){const n=(!r.regime||r.regime==='todos')?h.m:h.ms[r.regime];if(n>=+r.n)return false;}
+  if(r.tipo==='intervalo'&&b&&h){for(const k of h.wk){if(k!==b.key&&Math.abs(ddiff(k,b.key))<+r.dias)return false;}}
+  if(r.tipo==='naoJuntos'&&(c.id===r.c1||c.id===r.c2)){const o=c.id===r.c1?r.c2:r.c1;if(days.some(d=>{const v=getV(o,d);return v==='J3'||isNum(v);}))return false;}
+  if(r.tipo==='bloqueio'&&c.id===r.c&&(!r.regime||r.regime==='todos'||r.regime===t||(t==='N'&&r.regime==='SA'))){if(days.some(d=>(r.dows||[]).includes(dow(d))||(r.de&&d>=r.de&&(!r.ate||d<=r.ate))))return false;}}
+  return true;}
+// alertas das regras na aba Escala
+function ruleAlerts(ym,aid){const out=[],rs=regrasAtivas().filter(r=>r.tipo!=='texto'&&(!r.area||r.area===aid));if(!rs.length||!hasMonthData(ym,aid))return out;
+  const cs=colabsOfArea(aid,ym),bym=blocksOfMonth(ym);
+  rs.forEach(r=>{
+    if(r.tipo==='maxMes')cs.forEach(c=>{const n=bym.filter(b=>{const x=inBlock(c.id,b);return r.regime==='J3'?x.J3:r.regime==='SA'?x.SA:x.J3||x.SA;}).length;if(n>+r.n)out.push({lvl:'warn',msg:`Regra “${regraDesc(r)}”: ${c.nome} tem ${n}`});});
+    if(r.tipo==='intervalo')cs.forEach(c=>{const ks=bym.filter(b=>{const x=inBlock(c.id,b);return x.J3||x.SA;}).map(b=>b.key);for(let i=1;i<ks.length;i++)if(ddiff(ks[i-1],ks[i])<+r.dias)out.push({lvl:'warn',msg:`Regra de intervalo (${r.dias} dias): ${c.nome} em ${fmtS(ks[i-1])} e ${fmtS(ks[i])}`});});
+    if(r.tipo==='naoJuntos'&&cs.some(c=>c.id===r.c1||c.id===r.c2))blocksAll(ym).forEach(b=>{const on=id=>b.dias.some(d=>{const v=getV(id,d);return v==='J3'||isNum(v);});if(on(r.c1)&&on(r.c2))out.push({lvl:'warn',msg:`Regra: ${cNome(r.c1)} e ${cNome(r.c2)} juntos em ${diasLabel(b.dias)}`});});
+    if(r.tipo==='bloqueio'&&cs.some(c=>c.id===r.c)){const bad=monthDays(ym).filter(d=>{const v=getV(r.c,d);const tt=v==='J3'?'J3':isNum(v)?'SA':null;if(!tt)return false;if(r.regime&&r.regime!=='todos'&&r.regime!==tt)return false;return (r.dows||[]).includes(dow(d))||(r.de&&d>=r.de&&(!r.ate||d<=r.ate));});if(bad.length)out.push({lvl:'warn',msg:`Regra: ${regraDesc(r)} — escalado em ${bad.map(fmtS).join(', ')}`});}
+  });return out;}
+{const _ea=escalaAlerts;escalaAlerts=function(ym,aid){const a=_ea(ym,aid);return a.length===1&&a[0].lvl==='info'&&/não foi gerada/.test(a[0].msg)?a:a.concat(ruleAlerts(ym,aid));};}
+function regrasCard(){const rs=regras();return `<div class="card"><h3>Regras personalizadas da escala ${rs.length?`<span class="badge">${regrasAtivas().length} ativas</span>`:''}</h3><p class="hint" style="margin-top:0">Use quando notar erros ou vícios na escala. As regras de limite, intervalo, “não juntos” e restrição são seguidas pelo <b>Gerar escala</b> (quando houver outra pessoa disponível) e viram alerta na aba Escala. Orientações em texto aparecem para quem monta a escala.</p>
+  ${rs.length?`<div class="regs">${rs.map(r=>`<div class="reg ${r.ativa===false?'off':''}"><span class="badge ${r.tipo==='texto'?'':'b-sa'}">${REG_TIPOS[r.tipo]||r.tipo}</span><div class="rt"><b>${esc(regraDesc(r))}</b>${r.obs?`<div class="muted small">${esc(r.obs)}</div>`:''}<div class="muted small">${r.autor?`por ${esc(r.autor)}`:''}${r.criada?` em ${fmt(r.criada)}`:''}</div></div>${isAdmin()?`<label class="chk" title="Ativar/desativar"><input type="checkbox" data-chg="regTog" data-id="${r.id}" ${r.ativa!==false?'checked':''}> ativa</label><button class="btn sm gh" data-act="regEdit" data-id="${r.id}">Editar</button><button class="btn sm dan" data-act="regDel" data-id="${r.id}">Excluir</button>`:''}</div>`).join('')}</div>`:'<div class="alert ok">Nenhuma regra personalizada ainda.</div>'}
+  <div class="bar needs-admin" style="margin-top:12px"><button class="btn pri" data-act="regNew">+ Nova regra</button></div></div>`;}
+function openRegra(id){const old=regras().find(r=>r.id===id);const R0=old?JSON.parse(JSON.stringify(old)):{tipo:'maxMes',n:1,regime:'todos',dias:14,dows:[],ativa:true};
+  const cOpts=sel=>`<option value="">— escolha —</option>`+activeColabs().slice().sort((a,b)=>cmp(a.nome,b.nome)).map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${esc(c.nome)} · ${esc(areaShort(area(c.areaId)?.nome||FUNC[c.funcao]||''))}</option>`).join('');
+  const aOpts=sel=>`<option value="">Todas as áreas</option>`+areasSorted().map(a=>`<option value="${a.id}" ${a.id===sel?'selected':''}>${esc(a.nome)}</option>`).join('');
+  const rOpts=sel=>Object.entries(REG_REGIME).map(([k,l])=>`<option value="${k}" ${k===(sel||'todos')?'selected':''}>${l}</option>`).join('');
+  const read=()=>{const g=id=>document.getElementById(id);R0.tipo=val('r_tipo')||R0.tipo;['n','dias'].forEach(k=>{if(g('r_'+k))R0[k]=Math.max(1,+val('r_'+k)||1);});['regime','area','c','c1','c2','de','ate','texto','obs'].forEach(k=>{if(g('r_'+k))R0[k]=val('r_'+k).trim();});if(g('r_dows'))R0.dows=[...document.querySelectorAll('#r_dows input:checked')].map(i=>+i.value);};
+  openModal({render:()=>{const t=R0.tipo;return `${mHead(old?'Editar regra':'Nova regra da escala')}<div class="mb"><label>Tipo de regra<select id="r_tipo" data-k="tipo">${Object.entries(REG_TIPOS).map(([k,l])=>`<option value="${k}" ${k===t?'selected':''}>${l}</option>`).join('')}</select></label>
+    <div class="fg" style="margin-top:10px">${t==='maxMes'?`<label>Máximo de fins de semana por pessoa no mês<input type="number" id="r_n" min="1" max="5" value="${R0.n||1}"></label><label>Regime<select id="r_regime">${rOpts(R0.regime)}</select></label><label>Área<select id="r_area">${aOpts(R0.area)}</select></label>`:''}
+    ${t==='intervalo'?`<label>Dias mínimos entre plantões<input type="number" id="r_dias" min="7" max="60" step="7" value="${R0.dias||14}"></label><label>Área<select id="r_area">${aOpts(R0.area)}</select></label>`:''}
+    ${t==='naoJuntos'?`<label>Colaborador<select id="r_c1">${cOpts(R0.c1)}</select></label><label>Não junto com<select id="r_c2">${cOpts(R0.c2)}</select></label>`:''}
+    ${t==='bloqueio'?`<label>Colaborador<select id="r_c">${cOpts(R0.c)}</select></label><label>Sem<select id="r_regime">${rOpts(R0.regime)}</select></label><label>A partir de<input type="date" id="r_de" value="${R0.de||''}"></label><label>Até (vazio = sem fim)<input type="date" id="r_ate" value="${R0.ate||''}"></label>`:''}</div>
+    ${t==='bloqueio'?`<div style="margin-top:10px"><span class="small muted">Dias da semana (opcional)</span><div id="r_dows" class="dows">${DSEMX.map((d,i)=>`<label class="chk"><input type="checkbox" value="${i}" ${(R0.dows||[]).includes(i)?'checked':''}> ${d.slice(0,3)}</label>`).join('')}</div></div>`:''}
+    ${t==='texto'?`<label style="display:block">Orientação<textarea id="r_texto" style="width:100%;height:80px" placeholder="Ex.: evitar escalar recém-admitidos sozinhos em feriado">${esc(R0.texto||'')}</textarea></label>`:''}
+    <label style="display:block;margin-top:10px">Motivo / observação (opcional)<input id="r_obs" value="${esc(R0.obs||'')}" placeholder="Ex.: vício observado em out/26" style="width:100%"></label></div>
+    <div class="mf"><span class="sp"></span><button class="btn" data-act="close">Cancelar</button><button class="btn pri" data-act="ok">${old?'Salvar':'Adicionar regra'}</button></div>`;},
+  change(el){if(el.id==='r_tipo'){read();R0.tipo=el.value;drawModal();}},
+  act(a){if(a==='close')return closeModal();if(a!=='ok')return;read();const t=R0.tipo;
+    if(t==='naoJuntos'&&(!R0.c1||!R0.c2||R0.c1===R0.c2))return toast('Escolha dois colaboradores diferentes');
+    if(t==='bloqueio'&&(!R0.c||(!(R0.dows||[]).length&&!R0.de)))return toast('Escolha o colaborador e os dias da semana ou o período');
+    if(t==='texto'&&!R0.texto)return toast('Escreva a orientação');
+    const keep={id:R0.id||uid(),tipo:t,ativa:R0.ativa!==false,obs:R0.obs||'',autor:R0.autor||PROFILE?.nome||PROFILE?.email||'',criada:R0.criada||todayS()};
+    ({maxMes:['n','regime','area'],intervalo:['dias','area'],naoJuntos:['c1','c2'],bloqueio:['c','regime','de','ate','dows'],texto:['texto']})[t].forEach(k=>keep[k]=R0[k]);
+    const rs=regras().slice();const i=rs.findIndex(r=>r.id===keep.id);if(i>=0)rs[i]=keep;else rs.push(keep);state.config.regrasEscala=rs;touch();closeModal();render();toast(old?'Regra atualizada':'Regra adicionada — vale para as próximas gerações');}});}
+Object.assign(ACT,{
+  regNew:()=>isAdmin()?openRegra():deny(),
+  regEdit:el=>isAdmin()?openRegra(el.dataset.id):deny(),
+  regDel:el=>{if(!isAdmin())return deny();const r=regras().find(x=>x.id===el.dataset.id);confirmBox('Excluir regra?',esc(regraDesc(r)),'Excluir',()=>{state.config.regrasEscala=regras().filter(x=>x.id!==r.id);touch();render();},true);},
+  regTog:el=>{if(!isAdmin()){el.checked=!el.checked;return deny();}const r=regras().find(x=>x.id===el.dataset.id);if(r){r.ativa=el.checked;state.config.regrasEscala=regras().slice();touch();render();}}
+});
+const orientacoesHtml=()=>{const t=regrasAtivas();if(!t.length)return '';return `<details class="card orient"><summary><b>Regras da equipe</b> <span class="muted small">${t.length} ativa(s) · clique para ver</span></summary><ul class="rules small">${t.map(r=>`<li><span class="badge ${r.tipo==='texto'?'':'b-sa'}">${REG_TIPOS[r.tipo]}</span> ${esc(regraDesc(r))}${r.obs?` <span class="muted">— ${esc(r.obs)}</span>`:''}</li>`).join('')}</ul>${isAdmin()?'<a data-act="tab" data-v="config" class="small">Editar em Configurações</a>':''}</details>`;};
 
 /* ================= login ================= */
 let LOGIN={mode:'entrar',msg:'',err:''};

@@ -411,3 +411,17 @@ table.t.hm td,table.t.hm th{text-align:center}
 @page{margin:10mm}
 .mdl.share{width:min(1440px,96vw)}
 table.t td[style*="text-align:right"],table.t th[style*="text-align:right"]{white-space:nowrap}
+/* ===================== v5 ===================== */
+table.t.det td{vertical-align:top}
+table.t.det td.jus{max-width:420px;white-space:normal}
+table.t.det tr.pend td{background:var(--erbg)}
+table.t.det tr.pend td:first-child{box-shadow:inset 4px 0 0 var(--er)}
+.jus-info{background:var(--glasshd);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.regs{display:flex;flex-direction:column;gap:8px}
+.reg{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--card2)}
+.reg .rt{flex:1;min-width:220px}
+.reg.off{opacity:.5}
+.dows{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+details.orient{padding:12px 20px}
+details.orient summary{cursor:pointer}
+details.orient ul{margin:10px 0 6px}
