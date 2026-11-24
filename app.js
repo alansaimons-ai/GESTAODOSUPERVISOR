@@ -350,7 +350,7 @@ const ui=Object.assign({tab:'geral',ym:todayS().slice(0,7),areaId:'',year:+today
 function toast(msg){const d=document.createElement('div');d.textContent=msg;$('#toast').appendChild(d);setTimeout(()=>d.remove(),3500);}
 function openModal(m){M=m;drawModal();}
 function closeModal(){M=null;$('#modal').innerHTML='';if(dirty){clearTimeout(saveTimer);saveTimer=setTimeout(doSave,1500);}}
-function drawModal(){if(!M)return;$('#modal').innerHTML=`<div class="ov" data-act="ov"><div class="mdl ${M.wide?'wide':''}">${M.render()}</div></div>`;}
+function drawModal(){if(!M)return;$('#modal').innerHTML=`<div class="ov" data-act="ov"><div class="mdl ${M.wide?'wide':''} ${M.cls||''}">${M.render()}</div></div>`;}
 const mHead=t=>`<div class="mh"><h3>${t}</h3><button class="x" data-act="close" aria-label="Fechar">×</button></div>`;
 function confirmBox(title,msg,okLabel,fn,danger){openModal({render:()=>`${mHead(title)}<div class="mb"><p style="margin:0">${msg}</p></div><div class="mf"><span class="sp"></span><button class="btn" data-act="close">Cancelar</button><button class="btn pri" ${danger?'style="background:var(--er);border-color:var(--er)"':''} data-act="ok">${okLabel}</button></div>`,act(a){if(a==='close')closeModal();if(a==='ok'){closeModal();fn();}}});}
 async function copyText(txt){try{await navigator.clipboard.writeText(txt);toast('Copiado — cole no Excel ou no WhatsApp');}catch(e){openModal({wide:true,render:()=>`${mHead('Copiar')}<div class="mb"><p class="hint">Selecione tudo e copie (Ctrl+C):</p><textarea readonly style="width:100%;height:320px;font-family:monospace;font-size:12px">${esc(txt)}</textarea></div>`,act(a){if(a==='close')closeModal();}});}}
@@ -445,12 +445,12 @@ function histMonths(){const cur=todayS().slice(0,7),y=+cur.slice(0,4);const all=
   const r=[];for(let m=a;m<=b;m=ymAdd(m,1))r.push(m);return r;}
 const HP={'3':'3 meses','6':'6 meses','12':'12 meses',ano:'Ano atual',anoant:'Ano anterior',tudo:'Tudo'};
 const HM={sa:['Horas de sobreaviso','h'],j3:['Dias de J3','d'],fds:['Plantões (fds/feriados)','']};
-function rHist(){
-  const months=histMonths(),cur=todayS().slice(0,7),metric=ui.hm||'sa',mlab=HM[metric];
-  const inSup=c=>!ui.hSup||c.supervisaoId===ui.hSup;
+function rHistEscala(){
+  const months=histSel(),cur=todayS().slice(0,7),metric=ui.hm||'sa',mlab=HM[metric];
+  const inSup=inSupSel;
   const val=(cid,m,k=metric)=>{const s=monthStat(cid,m);if(!s)return 0;return (k==='fds'?s.fds:s[k])||0;};
   const tot=(cid,k)=>sum(months.map(m=>val(cid,m,k)));
-  const scopeAreas=ui.hArea?[area(ui.hArea)].filter(Boolean):areasSorted();
+  const scopeAreas=selAreas();
   const peopleOf=aid=>state.colaboradores.filter(c=>c.areaId===aid&&inSup(c)&&(c.ativo!==false||months.some(m=>monthStat(c.id,m))));
   const P=scopeAreas.flatMap(a=>peopleOf(a.id));
   const areaTot=a=>{const ps=peopleOf(a.id);return{h:sum(ps.map(c=>tot(c.id,'sa'))),f:sum(ps.map(c=>tot(c.id,'fds'))),n:ps.filter(c=>c.ativo!==false).length};};
@@ -467,12 +467,11 @@ function rHist(){
   const top=act.slice().sort((a,b)=>tot(b.id,'sa')-tot(a.id,'sa'))[0];
   const topDev=top&&amean[top.areaId]&&metric==='sa'?(tot(top.id,'sa')-amean[top.areaId])/amean[top.areaId]:null;
   const mH=months.filter(m=>m<cur);const avgM=mH.length?sum(mH.map(m=>sum(P.map(c=>val(c.id,m,'sa')))))/mH.length:0;const curH=sum(P.map(c=>val(c.id,cur,'sa')));
-  const scopeName=ui.hArea?area(ui.hArea).nome:'Planta Interna SP';const supName=ui.hSup?' · Supervisão '+(sup(ui.hSup)?.nome||''):'';
+  const scopeName=scopeLabel();const supName=supLabel();
   const pLabel=months.length?`${ymShort(months[0])} – ${ymShort(months[months.length-1])}`:'';
   // escopo
-  const escRow=`<div class="escopo"><div class="esc-row"><button class="esc ${ui.hArea?'':'on'}" data-act="hArea" data-v=""><b>Planta Interna SP</b><span>Consolidado · ${fmtN(allTot.h)} h</span></button>${areasSorted().map(a=>{const t=areaTot(a);return `<button class="esc ${ui.hArea===a.id?'on':''}" data-act="hArea" data-v="${a.id}" title="${esc(a.nome)}"><b>${esc(areaShort(a.nome))}</b><span>${fmtN(t.h)} h · ${t.f} plantões</span></button>`;}).join('')}</div></div>`;
-  const chips=`<div class="fchips"><span class="flbl">Período:</span>${Object.entries(HP).map(([k,l])=>`<button class="chipf ${(ui.hp||'12')===k?'on':''}" data-act="hp" data-v="${k}">${l}</button>`).join('')}<span class="flbl">Supervisão:</span><button class="chipf ${ui.hSup?'':'on'}" data-act="hSup" data-v="">Todas</button>${state.supervisoes.map(s=>`<button class="chipf ${ui.hSup===s.id?'on':''}" data-act="hSup" data-v="${s.id}">${esc(s.nome)}</button>`).join('')}<span class="flbl">Métrica:</span>${Object.entries(HM).map(([k,[l]])=>`<button class="chipf ${metric===k?'on':''}" data-act="hm" data-v="${k}">${l}</button>`).join('')}</div>`;
-  const crumb=`<div class="breadcrumb"><a data-act="hArea" data-v="">Planta Interna SP</a>${ui.hArea?` › <span>${esc(scopeName)}</span>`:''}${ui.hSup?` › <span>${esc(sup(ui.hSup)?.nome||'')}</span>`:''}<span class="r">Período ${pLabel} · ${act.length} colaboradores escaláveis</span></div>`;
+  const crumb=`<div class="breadcrumb"><span>${esc(scopeName)}${esc(supName)}</span><span class="r">${periodoLabel(months)} · ${act.length} colaboradores escaláveis</span></div>`;
+  const chips=fbar(filtrosComuns([msel('hm','Métrica',Object.entries(HM).map(([k,[l]])=>({v:k,l})),{single:true})]));
   const meta=`<div class="metabar"><b>Referência do rodízio</b><span>Carga de cada pessoa comparada à média da própria área:</span><span class="pill p-ok">até ±20% equilibrado</span><span class="pill p-at">±20–40% atenção</span><span class="pill p-er">acima de ±40%</span></div>`;
   // evolução
   const series=months.map(m=>{const by={};scopeAreas.forEach(a=>by[a.id]=sum(peopleOf(a.id).map(c=>val(c.id,m))));return{m,by,t:sum(Object.values(by)),j3:sum(P.map(c=>val(c.id,m,'j3')))};});
@@ -486,9 +485,9 @@ function rHist(){
   // cards por área
   const lc=`<div class="lcards">${scopeAreas.map(a=>{const ps=peopleOf(a.id),pa=act.filter(c=>c.areaId===a.id);const h=sum(ps.map(c=>tot(c.id,'sa'))),f=sum(ps.map(c=>tot(c.id,'fds'))),j=sum(ps.map(c=>tot(c.id,'j3')));const tp=pa.slice().sort((x,y)=>tot(y.id,'sa')-tot(x.id,'sa'))[0];const ok=pa.filter(c=>band(c)==='ok').length;
     return `<div class="lcard" data-act="hArea" data-v="${a.id}"><span class="bar" style="background:${areaCor(a.id)}"></span><h4>${esc(a.nome)}</h4><div class="lnum">${fmtN(h)} h</div><div class="muted small">${f} plantões${j?` · ${j} dias de J3`:''} · maior carga: ${tp?esc(short(tp.nome)):'—'}</div><div class="mets"><div><b>${pa.length}</b>pessoas</div><div><b>${pa.length?fmtN(h/pa.length):0} h</b>por pessoa</div><div><b>${pa.length?Math.round(ok/pa.length*100):0}%</b>equilíbrio</div></div></div>`;}).join('')}</div>`;
-  return pageHead('Histórico','Histórico','Planta Interna SP · plantões, sobreaviso e equilíbrio do rodízio · dados da escala desde jan/2025 e aba METODO (2024)',`<button class="btn" data-act="copyHist">⇩ Copiar para Excel</button>`)+
-  escRow+chips+crumb+meta+
-  `<div class="esc-titulo">Resultado consolidado <b>${esc(scopeName)} — ${ui.hArea?'Área':'Consolidado'}${esc(supName)}</b></div>`+
+  return histHead(`<button class="btn" data-act="copyHist">⇩ Copiar para Excel</button>`)+
+  chips+crumb+meta+
+  `<div class="esc-titulo">Resultado consolidado <b>${esc(scopeName)} — ${ui.hAreas.length?'Áreas':'Consolidado'}${esc(supName)}</b></div>`+
   hub([hubIt('clock','Horas de sobreaviso',fmtN(H)+' h',`média de ${fmtN(months.length?H/months.length:0)} h/mês · ${act.length?fmtN(H/act.length):0} h por pessoa`,{act:'hm',data:'data-v="sa"'}),
        hubIt('shield','Plantão J3',J+' dias',J?`${Math.round(J/2)} fins de semana de J3`:'sem J3 no período/escopo',{act:'hm',data:'data-v="j3"'}),
        hubIt('doc','Plantões',F,`fins de semana e feriados · média ${act.length?fmtN(F/act.length):0} por pessoa`,{act:'hm',data:'data-v="fds"'})],
@@ -551,10 +550,10 @@ function rEscala(){
   const wbl=blocksAll(ym);
   const wk=wbl.map(b=>{const lines=aList.map(a=>{const p=blockPeople(a.id,b);if(!p.J3.length&&!p.SA.length)return '';return `<div class="row"><span class="small muted" style="min-width:90px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.nome)}">${esc(areaShort(a.nome))}</span><div>${p.J3.map(c=>`<span class="badge b-j3">J3</span> ${esc(short(c.nome))}`).join('<br>')}${p.J3.length&&p.SA.length?'<br>':''}${p.SA.map(x=>`<span class="badge b-sa">${x.h}h</span> ${esc(short(x.c.nome))}`).join('<br>')}</div></div>`;}).join('');
     return `<div class="wkc"><h4><span>${diasLabel(b.dias)}${b.dias.some(isHol)?' <span class="badge b-wa">feriado</span>':''}</span><button class="btn sm" data-act="copyWk" data-k="${b.key}">Copiar</button></h4>${lines||'<span class="muted small">Sem plantonistas lançados</span>'}</div>`;}).join('');
-  return pageHead('Escala de plantão','Escala','Mesmo formato da planilha: número na célula = horas de sobreaviso no dia. Clique numa célula para lançar, trocar ou marcar acionamento.')+`
+  return pageHead('Escala de plantão','Escala','Mesmo formato da planilha: número na célula = horas de sobreaviso no dia. Clique numa célula para lançar, trocar ou marcar acionamento.')+metaBanner(ym)+`
   <div class="bar"><div class="mnav"><button class="btn" data-act="ym" data-v="-1">‹</button><b>${ymLabel(ym)}</b><button class="btn" data-act="ym" data-v="1">›</button></div>
   <select data-ui="areaId"><option value="">Todas as áreas</option>${areasSorted().map(x=>`<option value="${x.id}" ${x.id===ui.areaId?'selected':''}>${esc(x.nome)}</option>`).join('')}</select><span class="sp"></span>
-  <button class="btn needs-edit" data-act="newSN">+ Sobreaviso em vários dias</button><button class="btn" data-act="copyTsv">Copiar para Excel</button><button class="btn dan needs-edit" data-act="limpar" title="Remove sobreavisos, J3 e folgas de plantão do mês (mantém férias, BH, FA e atestados)">✕ Limpar escala</button><button class="btn pri needs-edit" data-act="gen">⚙ Gerar escala ${ui.areaId?'da área':'de todas as áreas'}</button></div>
+  <button class="btn needs-edit" data-act="newSN">+ Sobreaviso em vários dias</button>${shareBtn()}<button class="btn" data-act="copyTsv">Copiar para Excel</button><button class="btn dan needs-edit" data-act="limpar" title="Remove sobreavisos, J3 e folgas de plantão do mês (mantém férias, BH, FA e atestados)">✕ Limpar escala</button><button class="btn pri needs-edit" data-act="gen">⚙ Gerar escala ${ui.areaId?'da área':'de todas as áreas'}</button></div>
   ${alerts.length?`<div class="card"><h3>Alertas (${alerts.filter(a=>a.lvl==='err').length} críticos · ${alerts.filter(a=>a.lvl==='warn').length} atenção · ${alerts.filter(a=>a.lvl==='info').length} info)</h3>${alertHtml(shown)}${alerts.length>6?`<button class="btn sm" data-act="allAl">${ui.allAl?'Mostrar menos':`Ver todos os ${alerts.length}`}</button>`:''}</div>`:'<div class="alert ok">✅ Escala dentro das regras.</div>'}
   <div class="legend"><span><i class="tag t-SA">24</i>Horas de sobreaviso (⚡ acionado)</span><span><i class="tag t-J3">J3</i>Plantão 08h–17h</span><span><i class="tag t-F">FO</i>Folga</span><span><i class="tag t-FE">FE</i>Férias</span><span><i class="tag t-BH">BH</i>Banco de horas</span><span><i class="tag t-FA">FA</i>Folga abonada</span><span><i class="tag t-AT">AT</i>Atestado</span><span><i class="tag t-X">M</i>Outros</span></div>
   <div class="gridwrap" data-keep="grid"><table class="g"><thead><tr><th class="nm" rowspan="2">Colaborador</th>${head1}<th rowspan="2">J3<br>dias</th><th rowspan="2">Horas<br>SA</th><th rowspan="2">Plan-<br>tões</th></tr><tr>${head2}</tr></thead><tbody>${body}<tr class="foot"><td class="nm"><b>Total de horas</b></td><td colspan="${days.length+1}"></td><td class="tot">${tot.toLocaleString('pt-BR')}h</td><td></td></tr></tbody></table></div>
@@ -627,8 +626,8 @@ function escalaTsv(){const ym=ui.ym,days=monthDays(ym);const aList=ui.areaId?[ar
   return L.join('\n');}
 
 /* ---------- Histórico ---------- */
-function histTsv(){const cur=todayS().slice(0,7);const months=Array.from({length:12},(_,i)=>ymAdd(cur,i-11));const m=ui.hm;const L=[['Colaborador','Área',...months.map(ymShort)].join('\t')];
-  areasSorted().filter(a=>!ui.hArea||a.id===ui.hArea).forEach(a=>state.colaboradores.filter(c=>c.areaId===a.id).forEach(c=>{const v=months.map(x=>{const s=monthStat(c.id,x);return s?(m==='fds'?s.fds:s[m])||'':'';});if(v.some(Boolean)||c.ativo!==false)L.push([c.nome,a.nome,...v].join('\t'));}));return L.join('\n');}
+function histTsv(){const months=histSel();const m=ui.hm;const L=[['Colaborador','Área',...months.map(ymShort)].join('\t')];
+  selAreas().forEach(a=>state.colaboradores.filter(c=>c.areaId===a.id&&inSupSel(c)).forEach(c=>{const v=months.map(x=>{const s=monthStat(c.id,x);return s?(m==='fds'?s.fds:s[m])||'':'';});if(v.some(Boolean)||c.ativo!==false)L.push([c.nome,a.nome,...v].join('\t'));}));return L.join('\n');}
 
 /* ---------- Férias ---------- */
 function monthSegs(ym){const segs=[];let cur=[];monthDays(ym).forEach(d=>{cur.push(d);if(dow(d)===0){segs.push(cur);cur=[];}});if(cur.length)segs.push(cur);return segs;}
@@ -764,7 +763,7 @@ function rConfig(){
    <div class="bar"><button class="btn" data-act="exportJson">Copiar backup (JSON)</button><label class="btn needs-admin" style="flex-direction:row;font-size:14px">Importar arquivo…<input type="file" accept=".json,application/json" data-chg="importFile" style="display:none"></label></div>
    <div class="needs-admin"><textarea id="imp" placeholder="…ou cole aqui o conteúdo do backup" style="width:100%;height:80px;font-family:monospace;font-size:12px"></textarea><div class="bar" style="margin-top:8px"><button class="btn" data-act="importPaste">Importar texto colado</button></div></div></div>
   ${ROLE()!=='leitura'?`<div class="card"><h3>Histórico de alterações</h3><p class="hint" style="margin-top:0">Toda alteração fica registrada no banco com usuário, data e o valor anterior.</p>${AUDIT?auditHtml():'<button class="btn" data-act="loadAudit">Carregar últimas alterações</button>'}</div>`:''}
-  <div class="card"><h3>Regras do gerador</h3><div class="fg"><label>Sem plantão nos dias antes das férias<input type="number" min="0" max="10" data-chg="cfgNum" data-k="semPlantaoAntesFerias" value="${vacBuf().antes}" ${isAdmin()?'':'disabled'}></label><label>Sem plantão nos dias após o retorno<input type="number" min="0" max="10" data-chg="cfgNum" data-k="semPlantaoAposFerias" value="${vacBuf().depois}" ${isAdmin()?'':'disabled'}></label></div><p class="hint">Ex.: com 3 dias, quem sai de férias na segunda não pega o plantão do fim de semana anterior nem a noite de sexta. Se a equipe não tiver outra pessoa disponível, o gerador escala assim mesmo e mostra um alerta.</p></div>
+  ${metasCard()}<div class="card"><h3>Regras do gerador</h3><div class="fg"><label>Sem plantão nos dias antes das férias<input type="number" min="0" max="10" data-chg="cfgNum" data-k="semPlantaoAntesFerias" value="${vacBuf().antes}" ${isAdmin()?'':'disabled'}></label><label>Sem plantão nos dias após o retorno<input type="number" min="0" max="10" data-chg="cfgNum" data-k="semPlantaoAposFerias" value="${vacBuf().depois}" ${isAdmin()?'':'disabled'}></label></div><p class="hint">Ex.: com 3 dias, quem sai de férias na segunda não pega o plantão do fim de semana anterior nem a noite de sexta. Se a equipe não tiver outra pessoa disponível, o gerador escala assim mesmo e mostra um alerta.</p></div>
   <div class="card"><h3>Regras aplicadas</h3><ul class="rules small">
    <li><b>Véspera e retorno de férias</b>: sem plantão nos ${vacBuf().antes} dia(s) antes do início das férias e no(s) ${vacBuf().depois} dia(s) após o retorno, quando houver outra pessoa disponível.</li>
    <li><b>Formato</b>: igual à planilha — número na célula = horas de sobreaviso no dia; J3, FO, BH, FA, AT como siglas. Férias vêm do módulo de férias (FE).</li>
@@ -811,11 +810,11 @@ const ACT={
 };
 Object.assign(ACT,{
   tema:el=>{setTema(el.dataset.v);render();},
-  hArea:el=>{ui.hArea=el.dataset.v;persistUI();render();},
+  hArea:el=>{ui.hAreas=el.dataset.v?[el.dataset.v]:[];persistUI();render();window.scrollTo(0,0);},
   hp:el=>{ui.hp=el.dataset.v;persistUI();render();},
   hSup:el=>{ui.hSup=el.dataset.v;persistUI();render();},
   hm:el=>{ui.hm=el.dataset.v;persistUI();render();},
-  goYm:el=>{ui.ym=el.dataset.v;ui.areaId=ui.hArea||'';ui.tab='escala';persistUI();render();window.scrollTo(0,0);},
+  goYm:el=>{ui.ym=el.dataset.v;ui.areaId=ui.hAreas.length===1?ui.hAreas[0]:'';ui.tab='escala';persistUI();render();window.scrollTo(0,0);},
   limpar:()=>{const aList=ui.areaId?[area(ui.areaId)]:areasSorted();confirmBox('Limpar a escala?',`Serão removidos os sobreavisos, J3 e folgas de plantão (FO) de <b>${ymLabel(ui.ym)}</b> em <b>${ui.areaId?esc(area(ui.areaId).nome):'todas as áreas'}</b>. Férias, BH, FA, atestados e treinamentos são mantidos. As alterações ficam no histórico de alterações.`,'Limpar escala',()=>{buildIdx();let n=0;aList.forEach(a=>n+=limparMes(ui.ym,a.id));buildIdx();touch();render();toast(`${n} lançamento(s) removidos`);},true);},
   cfgNum:el=>{const v=Math.max(0,Math.min(10,Math.floor(+el.value||0)));state.config[el.dataset.k]=v;touch();toast('Regra atualizada — vale para as próximas gerações');},
   logout:async()=>{if(dirty)await doSave();await sb.auth.signOut();},
@@ -862,6 +861,247 @@ document.addEventListener('input',e=>{const el=e.target;if(el.closest('#modal'))
   if(el.dataset.uiq){ui[el.dataset.uiq]=el.value;const id=el.id;render();const n=document.getElementById(id);if(n){n.focus();const L=n.value.length;try{n.setSelectionRange(L,L);}catch(x){}}}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&M)closeModal();});
 window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(['geral','escala','historico','ferias','cadastros','config'].includes(h)&&h!==ui.tab){ui.tab=h;render();}});
+
+
+/* =====================================================================
+   VERSÃO 4 · filtros suspensos multi-seleção, consumo x meta,
+   horas extras justificadas, destaque de meta na escala, compartilhar
+   ===================================================================== */
+
+/* ---------- filtro suspenso (multi-seleção) ---------- */
+const MS={k:null};
+// opts: [{v,l,s}] · ui[k] = [] significa "todos"
+function msel(k,label,opts,o={}){
+  const single=!!o.single,open=MS.k===k;
+  const sel=single?ui[k]:(Array.isArray(ui[k])?ui[k]:[]);
+  const on=single?opts.filter(x=>x.v===sel):opts.filter(x=>sel.includes(x.v));
+  const resumo=single?(on[0]?.l||o.all||'—'):!on.length?(o.all||'Todos'):on.length<=2?on.map(x=>x.l).join(', '):`${on.length} de ${opts.length}`;
+  const chk=x=>single?x.v===sel:(!sel.length||sel.includes(x.v));
+  return `<div class="ms ${open?'open':''} ${!single&&on.length?'has':''}"><button type="button" class="ms-b" data-act="msOpen" data-k="${k}" aria-expanded="${open}"><span class="ms-l">${label}</span><span class="ms-v" title="${esc(resumo)}">${esc(resumo)}</span><span class="ms-c">▾</span></button>${open?`<div class="ms-p" role="listbox">${single?'':`<div class="ms-h"><a data-act="msAll" data-k="${k}">${esc(o.all||'Todos')}</a>${opts.length>8?`<span class="muted small">${opts.length} opções</span>`:''}</div>`}<div class="ms-list">${opts.map(x=>`<div class="ms-o ${chk(x)?'on':''}" data-act="msTog" data-k="${k}" data-v="${esc(x.v)}" ${single?'data-single="1"':''} role="option" aria-selected="${chk(x)}"><i class="ck ${single?'rd':''}"></i><span class="t">${esc(x.l)}</span>${x.s!=null?`<small>${esc(x.s)}</small>`:''}${single?'':`<a class="so" data-act="msOnly" data-k="${k}" data-v="${esc(x.v)}" title="Selecionar somente esta opção">só</a>`}</div>`).join('')}</div></div>`:''}</div>`;
+}
+const fbar=(items,right)=>`<div class="fbar">${items.join('')}${right?`<span class="sp"></span>${right}`:''}</div>`;
+document.addEventListener('click',e=>{if(MS.k&&!e.target.closest('.ms')){MS.k=null;document.querySelectorAll('.ms.open').forEach(n=>{n.classList.remove('open');const p=n.querySelector('.ms-p');if(p)p.remove();});}},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&MS.k){MS.k=null;render();}});
+const MS_OPTS={};// k -> lista completa (para "todos" ao desmarcar)
+Object.assign(ACT,{
+  msOpen:el=>{const k=el.dataset.k;MS.k=MS.k===k?null:k;render();},
+  msAll:el=>{ui[el.dataset.k]=[];persistUI();render();},
+  msOnly:(el,e)=>{e&&e.stopPropagation();ui[el.dataset.k]=[el.dataset.v];persistUI();render();},
+  msTog:(el,e)=>{if(e&&e.target.closest('.so'))return;const k=el.dataset.k,v=el.dataset.v;
+    if(el.dataset.single){ui[k]=v;MS.k=null;persistUI();render();return;}
+    const all=(MS_OPTS[k]||[]).map(x=>x.v);let s=Array.isArray(ui[k])&&ui[k].length?ui[k].slice():all.slice();
+    s=s.includes(v)?s.filter(x=>x!==v):[...s,v];if(!s.length||s.length>=all.length)s=[];ui[k]=s;persistUI();render();}
+});
+function opt(k,list){MS_OPTS[k]=list;return list;}
+
+/* ---------- seleção comum do Histórico ---------- */
+const curYm=()=>todayS().slice(0,7);
+const ANO0=2023;
+const anosOpts=()=>{const y=+todayS().slice(0,4),r=[];for(let a=y;a>=ANO0;a--)r.push({v:String(a),l:String(a)});return r;};
+const mesesOpts=()=>MES3.map((m,i)=>({v:pad(i+1),l:m}));
+if(!Array.isArray(ui.hAnos))ui.hAnos=[todayS().slice(0,4)];
+['hMeses','hAreas','hSups','heArea','heCol','heCls','heTur'].forEach(k=>{if(!Array.isArray(ui[k]))ui[k]=[];});
+if(!ui.hv)ui.hv='escala';
+function histSel(o={}){const cur=curYm(),lastEsc=Object.keys(state.escala).sort().pop()||cur;const lim=o.futuro&&lastEsc>cur?lastEsc:cur;
+  const anos=ui.hAnos.length?ui.hAnos.map(Number):anosOpts().map(x=>+x.v);const r=[];
+  anos.slice().sort().forEach(y=>{for(let m=1;m<=12;m++){const ym=`${y}-${pad(m)}`;if(ym>lim)continue;if(ui.hMeses.length&&!ui.hMeses.includes(pad(m)))continue;if(o.min&&ym<o.min)continue;r.push(ym);}});return r;}
+const selAreas=()=>ui.hAreas.length?areasSorted().filter(a=>ui.hAreas.includes(a.id)):areasSorted();
+const inSupSel=c=>!ui.hSups.length||ui.hSups.includes(c.supervisaoId||'');
+const scopeLabel=()=>ui.hAreas.length===1?(area(ui.hAreas[0])?.nome||''):ui.hAreas.length?`${ui.hAreas.length} áreas`:'Planta Interna SP';
+const supLabel=()=>ui.hSups.length?' · Supervisão '+ui.hSups.map(s=>sup(s)?.nome||'Sem supervisão').join(', '):'';
+const periodoLabel=ms=>ms.length?(ms.length===1?ymLabel(ms[0]):`${ymShort(ms[0])} – ${ymShort(ms[ms.length-1])} · ${ms.length} meses`):'sem meses no filtro';
+function filtrosComuns(extra){
+  return [msel('hAnos','Ano',opt('hAnos',anosOpts()),{all:'Todos os anos'}),
+    msel('hMeses','Mês',opt('hMeses',mesesOpts()),{all:'Todos os meses'}),
+    msel('hAreas','Área',opt('hAreas',areasSorted().map(a=>({v:a.id,l:areaShort(a.nome),s:''}))),{all:'Todas as áreas'}),
+    msel('hSups','Supervisão',opt('hSups',[...state.supervisoes.map(s=>({v:s.id,l:s.nome})),{v:'',l:'Sem supervisão'}]),{all:'Todas'}),...(extra||[])];
+}
+const HV=[['escala','Escala e rodízio'],['consumo','Consumo de horas x meta'],['he','Horas extras justificadas']];
+function histHead(tools){return pageHead('Histórico','Histórico','Planta Interna SP · escala, consumo de horas de sobreaviso e horas extras justificadas',tools)+`<div class="subtabs">${HV.map(([k,l])=>`<button class="${ui.hv===k?'on':''}" data-act="hv" data-v="${k}">${l}</button>`).join('')}</div>`;}
+ACT.hv=el=>{ui.hv=el.dataset.v;MS.k=null;persistUI();render();};
+function rHist(){return ui.hv==='consumo'?rHistConsumo():ui.hv==='he'?rHistHE():rHistEscala();}
+
+/* ---------- metas de sobreaviso ---------- */
+const META_DEF=[{desde:'2000-01',valor:2300},{desde:'2026-09',valor:2000}];
+const metas=()=>{const m=state.config.metasSobreaviso;return (Array.isArray(m)&&m.length?m:META_DEF).slice().sort((a,b)=>cmp(a.desde,b.desde));};
+const metaOf=ym=>{let v=null;metas().forEach(x=>{if(x.desde<=ym)v=+x.valor;});return v;};
+function monthProfile(ym){const ds=monthDays(ym);const sat=ds.filter(d=>dow(d)===6).length,sun=ds.filter(d=>dow(d)===0).length;const hol=ds.filter(d=>isHol(d)&&!isWE(d));return{sat,sun,fds:Math.max(sat,sun),hol};}
+function monthNotes(ym){const p=monthProfile(ym),r=[];if(p.fds>=5)r.push(`${p.fds} fins de semana`);if(p.hol.length)r.push(`${p.hol.length} feriado${p.hol.length>1?'s':''} em dia útil (${p.hol.map(d=>`${fmtS(d)} ${holName(d)}`).join(', ')})`);return r;}
+function saMonth(ym,cs){let t=0,we=0,nt=0,j3=0,ac=0,fds=0;const m=state.escala[ym];
+  cs.forEach(c=>{if(m){const cells=m[c.id];if(cells){const wk=new Set();for(const dd in cells){const v=cells[dd],d=ym+'-'+dd;if(isNum(v)){t+=v;if(isWork(d))nt+=v;else{we+=v;wk.add(satKey(d));}}else if(v==='J3'){j3++;wk.add(satKey(d));}}fds+=wk.size;}
+      const a=state.acionados[ym]&&state.acionados[ym][c.id];if(a)ac+=Object.keys(a).length;}
+    else{const h=state.histAgg[c.id]&&state.histAgg[c.id][ym];if(h){t+=h.sa||0;j3+=h.j3||0;}}});
+  return{t,we,nt,j3,ac,fds,src:m?'grid':Object.keys(state.histAgg).length?'agg':'none'};}
+function metaStatus(h,meta){if(!meta)return{cls:'',pill:''};const r=h/meta;return r>1?{cls:'er',pill:'<span class="pill p-er">Acima da meta</span>'}:r>=.95?{cls:'at',pill:'<span class="pill p-at">No limite</span>'}:{cls:'ok',pill:'<span class="pill p-ok">Dentro da meta</span>'};}
+
+/* ---------- destaque de meta na aba Escala ---------- */
+function metaBanner(ym){
+  const all=state.colaboradores,s=saMonth(ym,all),meta=metaOf(ym),r=meta?s.t/meta:0,st=metaStatus(s.t,meta),notes=monthNotes(ym),p=monthProfile(ym);
+  const over=meta&&s.t>meta;const ar=ui.areaId?area(ui.areaId):null;const sa=ar?saMonth(ym,all.filter(c=>c.areaId===ar.id)):null;
+  const obs=over?`Acima da meta em <b>${fmtN(s.t-meta)} h</b>${notes.length?` — mês com ${notes.join(' e ')}.`:' — sem feriado em dia útil nem 5º fim de semana: revise noites e plantões extras.'}`:
+    meta?`Saldo de <b>${fmtN(meta-s.t)} h</b> até a meta.${notes.length?` Atenção: mês com ${notes.join(' e ')}.`:''}`:'';
+  return `<div class="metab ${st.cls}"><div class="mb-main"><div class="mb-k">Sobreaviso · ${ymLabel(ym)}</div><div class="mb-v">${fmtN(s.t)} h <small>/ meta ${meta?fmtN(meta)+' h':'—'}</small></div>
+   <div class="mb-bar"><i style="width:${Math.min(100,r*100).toFixed(1)}%"></i>${r>1?`<b style="left:${(100/r).toFixed(1)}%"></b>`:''}</div><div class="mb-s">${meta?Math.round(r*100)+'% da meta':''} ${st.pill}</div></div>
+   <div class="mb-side"><div><b>${fmtN(s.we)} h</b><span>fins de semana e feriados</span></div><div><b>${fmtN(s.nt)} h</b><span>noites de dias úteis</span></div><div><b>${p.fds}</b><span>fins de semana no mês</span></div><div><b>${p.hol.length}</b><span>feriado(s) em dia útil</span></div>${sa?`<div><b>${fmtN(sa.t)} h</b><span>${esc(areaShort(ar.nome))} (${s.t?Math.round(sa.t/s.t*100):0}% do total)</span></div>`:''}</div>
+   ${obs?`<div class="mb-obs">${over?'⚠️':'ℹ️'} ${obs} <span class="muted">Meta da equipe toda: ${metas().map(x=>`${fmtN(x.valor)} h desde ${x.desde<'2001'?'o início':ymShort(x.desde)}`).join(' · ')}.</span></div>`:''}</div>`;
+}
+
+/* ---------- Histórico · consumo de horas x meta ---------- */
+function rHistConsumo(){
+  const months=histSel({futuro:true,min:'2024-01'}),cur=curYm(),aS=selAreas();const filtrado=ui.hAreas.length||ui.hSups.length;
+  const P=state.colaboradores.filter(c=>aS.some(a=>a.id===c.areaId)&&inSupSel(c));
+  const rows=months.map(m=>{const s=saMonth(m,P),byA={};aS.forEach(a=>byA[a.id]=saMonth(m,P.filter(c=>c.areaId===a.id)).t);const meta=metaOf(m);return{m,...s,byA,meta,notes:monthNotes(m),prof:monthProfile(m)};});
+  const past=rows.filter(r=>r.m<=cur&&r.t>0),H=sum(rows.map(r=>r.t)),J=sum(rows.map(r=>r.j3)),WE=sum(rows.map(r=>r.we)),NT=sum(rows.map(r=>r.nt)),AC=sum(rows.map(r=>r.ac));
+  const comMeta=rows.filter(r=>r.meta&&r.t>0),acima=comMeta.filter(r=>r.t>r.meta),dentro=comMeta.length-acima.length;
+  const maior=rows.slice().sort((a,b)=>b.t-a.t)[0],rc=rows.find(r=>r.m===cur);
+  const pp=comMeta.length?Math.round(dentro/comMeta.length*100):0;
+  const pill=pp>=80?'<span class="pill p-ok">Na meta</span>':pp>=50?'<span class="pill p-at">Atenção</span>':'<span class="pill p-er">Estourando</span>';
+  const mx=Math.max(1,...rows.map(r=>Math.max(r.t,filtrado?0:(r.meta||0))));const showV=rows.length<=18;
+  const chart=`<div class="chart">${rows.map(r=>{const st=filtrado?{cls:''}:metaStatus(r.t,r.meta);return `<div class="cb ${r.m>cur?'fut':''}" data-act="goYm" data-v="${r.m}" title="${ymLabel(r.m)}: ${fmtN(r.t)} h${r.meta?` · meta ${fmtN(r.meta)} h`:''}${r.notes.length?' · '+r.notes.join(' · '):''}">${showV&&r.t?`<span class="vl ${st.cls}">${fmtN(r.t)}</span>`:''}<div class="stk" style="height:${(r.t/mx*88).toFixed(1)}%">${aS.map(a=>r.byA[a.id]?`<i style="height:${(r.byA[a.id]/r.t*100).toFixed(2)}%;background:${areaCor(a.id)}"></i>`:'').join('')}</div>${!filtrado&&r.meta?`<em class="mt ${st.cls}" style="bottom:${(r.meta/mx*88).toFixed(1)}%"></em>`:''}</div>`;}).join('')}</div><div class="cx">${rows.map(r=>`<span>${showV||r.m.endsWith('-01')||rows.length<=24?ymShort(r.m):''}</span>`).join('')}</div>`;
+  const lgd=`<div class="lgd">${aS.map(a=>`<span><i style="background:${areaCor(a.id)}"></i>${esc(areaShort(a.nome))}</span>`).join('')}${filtrado?'':'<span><i style="background:var(--txt);height:2px"></i>meta do mês</span>'}<span class="muted">meses futuros: escala já lançada</span></div>`;
+  const tbl=`<div class="tw"><table class="t"><thead><tr><th>Mês</th><th style="text-align:right">Sobreaviso</th><th style="text-align:right">Meta</th><th style="text-align:right">Uso</th><th style="text-align:right">Fds/feriado</th><th style="text-align:right">Noites</th><th style="text-align:right">J3 (dias)</th><th style="text-align:right">Acion.</th><th>Fins de semana · feriados</th><th>Observação</th></tr></thead><tbody>${rows.slice().reverse().map(r=>{const st=metaStatus(r.t,r.meta),over=r.meta&&r.t>r.meta;
+    return `<tr><td><a data-act="goYm" data-v="${r.m}" style="cursor:pointer"><b>${ymLabel(r.m)}</b></a>${r.m>cur?' <span class="badge b-fe">planejado</span>':''}${r.src==='agg'?' <span class="badge">METODO</span>':''}</td><td style="text-align:right"><b>${fmtN(r.t)} h</b></td><td style="text-align:right" class="muted">${r.meta?fmtN(r.meta)+' h':'—'}</td><td style="text-align:right">${r.meta&&r.t?`<span class="badge ${over?'b-er':st.cls==='at'?'b-wa':'b-ok'}">${Math.round(r.t/r.meta*100)}%</span>`:'—'}</td><td style="text-align:right">${r.src==='grid'?fmtN(r.we)+' h':'—'}</td><td style="text-align:right">${r.src==='grid'?fmtN(r.nt)+' h':'—'}</td><td style="text-align:right">${r.j3||''}</td><td style="text-align:right">${r.ac||''}</td><td class="small">${r.prof.fds} fds${r.prof.hol.length?` · ${r.prof.hol.length} feriado(s)`:''}</td><td class="small">${over?`<b class="t-er">+${fmtN(r.t-r.meta)} h.</b> ${r.notes.length?esc(r.notes.join(' e ')):'Sem feriado nem 5º fim de semana — verificar noites e escalas extras'}`:r.notes.length&&r.t?`<span class="muted">${esc(r.notes.join(' e '))}</span>`:''}</td></tr>`;}).join('')}</tbody></table></div>`;
+  return histHead(`<button class="btn" data-act="copyCons">⇩ Copiar para Excel</button>`)+fbar(filtrosComuns())+
+  `<div class="breadcrumb"><span>${esc(scopeLabel())}${esc(supLabel())}</span><span class="r">${periodoLabel(months)} · consumo calculado pela escala lançada na ferramenta${rows.some(r=>r.src==='agg')?' (2024: aba METODO)':''}</span></div>`+
+  `<div class="metabar"><b>Meta de sobreaviso</b><span>Horas de sobreaviso da equipe toda por mês:</span>${metas().map(x=>`<span class="pill p-at">${fmtN(x.valor)} h ${x.desde<'2001'?'até a próxima vigência':'a partir de '+ymShort(x.desde)}</span>`).join('')}${filtrado?'<span>· com filtro de área/supervisão a meta não se aplica (é da equipe inteira)</span>':''}</div>`+
+  `<div class="esc-titulo">Resultado consolidado <b>${esc(scopeLabel())} — Consumo de horas</b></div>`+
+  hub([hubIt('clock','Horas de sobreaviso',fmtN(H)+' h',`média de ${fmtN(rows.length?H/rows.length:0)} h/mês no filtro`),
+       hubIt('shield','Plantão J3',J+' dias',`${fmtN(WE)} h em fins de semana/feriados · ${fmtN(NT)} h em noites`),
+       hubIt('bolt','Acionamentos',AC,'dias de sobreaviso marcados como acionados (⚡)')],
+      {segs:[{v:dentro,c:'#79D988'},{v:acima.length,c:'#ef4444'}],k:'Meses dentro da meta',v:filtrado?'—':pp+'%',s:filtrado?'meta vale para a equipe inteira — limpe os filtros de área/supervisão':`${dentro} de ${comMeta.length} meses com escala dentro da meta`,pill:filtrado?'':pill},
+      [hubIt('alert','Meses acima da meta',filtrado?'—':acima.length,acima.length&&!filtrado?acima.slice(-3).map(r=>ymShort(r.m)).join(', '):'nenhum',{cls:acima.length&&!filtrado?'er':'ok'}),
+       hubIt('trend','Maior consumo',maior&&maior.t?ymShort(maior.m):'—',maior&&maior.t?`${fmtN(maior.t)} h${maior.notes.length?' · '+maior.notes[0]:''}`:''),
+       hubIt('flag','Mês atual',rc?fmtN(rc.t)+' h':'—',rc&&rc.meta?`meta ${fmtN(rc.meta)} h · ${Math.round(rc.t/rc.meta*100)}%`:'',{cls:rc&&rc.meta&&rc.t>rc.meta&&!filtrado?'er':'',act:'goYm',data:`data-v="${cur}"`})])+
+  secdiv(1,'Consumo mês a mês','horas de sobreaviso por mês e por área, com a meta de cada mês · clique numa barra para abrir a escala')+`<div class="card"><h3>Sobreaviso por mês · ${esc(scopeLabel())}</h3>${chart}${lgd}</div>`+
+  secdiv(2,'Meses e observações','meses acima da meta indicam se tiveram 5 fins de semana ou feriados em dia útil')+`<div class="card"><h3>Detalhamento · ${periodoLabel(months)}</h3>${tbl}</div>`;
+}
+ACT.copyCons=()=>{const P=state.colaboradores.filter(c=>selAreas().some(a=>a.id===c.areaId)&&inSupSel(c));const L=[['Mês','Sobreaviso (h)','Meta (h)','Uso %','Fds/feriado (h)','Noites (h)','J3 (dias)','Acionamentos','Fins de semana','Feriados em dia útil','Observação'].join('\t')];
+  histSel({futuro:true,min:'2024-01'}).forEach(m=>{const s=saMonth(m,P),meta=metaOf(m),p=monthProfile(m);L.push([ymLabel(m),s.t,meta||'',meta?Math.round(s.t/meta*100)+'%':'',s.we,s.nt,s.j3,s.ac,p.fds,p.hol.length,monthNotes(m).join(' e ')].join('\t'));});copyText(L.join('\n'));};
+
+/* ---------- Horas extras justificadas ---------- */
+let HE=null,HE_ERR='',HE_LOADING=false;
+async function loadHE(){if(HE_LOADING)return;HE_LOADING=true;try{const r=await fetchAll('horas_extras');HE=r.map(x=>({...x,horas:+x.horas}));HE_ERR='';}catch(e){HE=null;HE_ERR=e.message||String(e);}HE_LOADING=false;if(ui.tab==='historico')render();}
+const heArea=r=>r.supervisao||(r.colab_id&&colab(r.colab_id)?areaShort(area(colab(r.colab_id).areaId)?.nome||''):'')||'Não informado';
+const heMotivo=s=>String(s||'').toUpperCase().replace(/[.\-–;:]+$/,'').replace(/\s+/g,' ').trim()||'(sem motivo)';
+const TURNO_COR={'Diurno':'#FFD919','Semi-Noturno':'#FFB987','Noturno':'#85A7FF','Madrugada':'#5A11EE','':'#8583A8'};
+const CLS_COR=['#ef4444','#FFD919','#85A7FF','#79D988','#C0A1FF','#FFB987','#8583A8'];
+function heRows(){if(!HE)return[];const ms=new Set(histSel());
+  return HE.filter(r=>ms.has(r.data.slice(0,7))&&(!ui.heArea.length||ui.heArea.includes(heArea(r)))&&(!ui.heCol.length||ui.heCol.includes(r.colaborador))&&(!ui.heCls.length||ui.heCls.includes(r.classificacao))&&(!ui.heTur.length||ui.heTur.includes(r.turno||''))&&(!ui.hSups.length||(r.colab_id&&colab(r.colab_id)&&ui.hSups.includes(colab(r.colab_id).supervisaoId||''))));}
+const grpSum=(rows,f)=>{const m={};rows.forEach(r=>{const k=f(r);(m[k]=m[k]||{k,h:0,n:0,rows:[]});m[k].h+=r.horas;m[k].n++;m[k].rows.push(r);});return Object.values(m).sort((a,b)=>b.h-a.h);};
+const hh=n=>{const m=Math.round((+n||0)*60);return `${Math.floor(m/60)}h${pad(m%60)}`;};
+// HE que caiu em dia de sobreaviso da pessoa (mesmo dia, ou madrugada seguinte a uma noite de sobreaviso)
+function heEmSA(r){if(!r.colab_id)return null;const d=r.data;const m=state.escala[d.slice(0,7)];if(!m)return null;if(isNum(getV(r.colab_id,d)))return true;if(r.inicio&&tmin(r.inicio)<480&&isNum(getV(r.colab_id,add(d,-1))))return true;return false;}
+function rHistHE(){
+  const tools=`${isAdmin()?`<label class="btn gh" title="Atualiza a base com a planilha Estudo de Horas Extras (.xlsx, aba Base)">⇪ Atualizar planilha<input type="file" accept=".xlsx,.xlsm" data-chg="heImport" style="display:none"></label>`:''}<button class="btn" data-act="copyHE">⇩ Copiar para Excel</button>`;
+  if(!HE){if(!HE_ERR&&!HE_LOADING)loadHE();return histHead(tools)+`<div class="card empty">${HE_ERR?`Não foi possível carregar as horas extras: ${esc(HE_ERR)}.<br><span class="small">Se a tabela ainda não existe, rode <b>supabase/migracao_v4.sql</b> e <b>seed_horas_extras.sql</b> no SQL Editor do Supabase.</span>`:'Carregando horas extras…'}</div>`;}
+  const all=HE.filter(r=>histSel().includes(r.data.slice(0,7)));const R=heRows(),months=histSel();
+  const cols=grpSum(all,r=>r.colaborador).map(g=>({v:g.k,l:g.k,s:fmtN(g.h)+' h'}));
+  const fil=filtrosComuns([msel('heArea','Área (planilha)',opt('heArea',grpSum(all,heArea).map(g=>({v:g.k,l:g.k,s:fmtN(g.h)+' h'}))),{all:'Todas'}),
+    msel('heCol','Colaborador',opt('heCol',cols),{all:'Todos'}),
+    msel('heCls','Classificação',opt('heCls',grpSum(all,r=>r.classificacao).map(g=>({v:g.k,l:g.k,s:fmtN(g.h)+' h'}))),{all:'Todas'}),
+    msel('heTur','Turno',opt('heTur',grpSum(all,r=>r.turno||'').map(g=>({v:g.k,l:g.k||'Não informado',s:fmtN(g.h)+' h'}))),{all:'Todos'})]).filter((x,i)=>i!==2);// área da escala não se aplica
+  const H=sum(R.map(r=>r.horas)),pes=new Set(R.map(r=>r.colaborador)),mesesCom=new Set(R.map(r=>r.data.slice(0,7))).size;
+  const byCls=grpSum(R,r=>r.classificacao),byTur=grpSum(R,r=>r.turno||''),byCol=grpSum(R,r=>r.colaborador),byMot=grpSum(R,r=>heMotivo(r.motivo));
+  const notH=sum(R.filter(r=>/Noturno|Madrugada/.test(r.turno)&&!/Semi/.test(r.turno)).map(r=>r.horas));
+  const top=byCol[0],fds=sum(R.filter(r=>!isWork(r.data)).map(r=>r.horas));
+  // cruzamento com a escala
+  const X=R.map(r=>({r,s:heEmSA(r)})).filter(x=>x.s!==null);const xIn=sum(X.filter(x=>x.s).map(x=>x.r.horas)),xOut=sum(X.filter(x=>!x.s).map(x=>x.r.horas));
+  const segs=byCls.slice(0,5).map((g,i)=>({v:g.h,c:CLS_COR[i]}));if(byCls.length>5)segs.push({v:sum(byCls.slice(5).map(g=>g.h)),c:CLS_COR[6]});
+  // evolução por mês (empilhado por turno)
+  const series=months.map(m=>{const rs=R.filter(r=>r.data.startsWith(m));const by={};rs.forEach(r=>by[r.turno||'']=(by[r.turno||'']||0)+r.horas);return{m,t:sum(rs.map(r=>r.horas)),by};});
+  const mx=Math.max(1,...series.map(s=>s.t)),avg=series.length?H/series.length:0,showV=series.length<=18,TUR=['Diurno','Semi-Noturno','Noturno','Madrugada',''];
+  const chart=`<div class="chart">${series.map(s=>`<div class="cb" title="${ymLabel(s.m)}: ${hh(s.t)}">${showV&&s.t?`<span class="vl">${fmtN(s.t)}</span>`:''}<div class="stk" style="height:${(s.t/mx*88).toFixed(1)}%">${TUR.map(t=>s.by[t]?`<i style="height:${(s.by[t]/s.t*100).toFixed(2)}%;background:${TURNO_COR[t]}" title="${t||'Não informado'}: ${hh(s.by[t])}"></i>`:'').join('')}</div></div>`).join('')}${avg?`<div class="avg" style="bottom:${(avg/mx*0.88*220).toFixed(0)}px"><span>média ${fmtN(avg)} h</span></div>`:''}</div><div class="cx">${series.map(s=>`<span>${showV||s.m.endsWith('-01')?ymShort(s.m):''}</span>`).join('')}</div><div class="lgd">${TUR.filter(t=>byTur.some(g=>g.k===t)).map(t=>`<span><i style="background:${TURNO_COR[t]}"></i>${t||'Não informado'}</span>`).join('')}</div>`;
+  // ano x mês
+  const anos=[...new Set(months.map(m=>m.slice(0,4)))].sort();const cell={};R.forEach(r=>{const k=r.data.slice(0,7);cell[k]=(cell[k]||0)+r.horas;});const cmx=Math.max(1,...Object.values(cell));
+  const ym=`<div class="tw"><table class="t hm"><thead><tr><th>Ano</th>${MES3.map(m=>`<th>${m}</th>`).join('')}<th>Total</th><th>Média/mês</th></tr></thead><tbody>${anos.map(y=>{const vs=MES3.map((_,i)=>cell[`${y}-${pad(i+1)}`]||0);const n=months.filter(m=>m.startsWith(y)).length;return `<tr><td><b>${y}</b></td>${vs.map(v=>`<td style="${v?`background:rgba(255,217,25,${(.12+v/cmx*.7).toFixed(2)});color:#2E2D39`:''}">${v?fmtN(v):''}</td>`).join('')}<td class="tot"><b>${fmtN(sum(vs))}</b></td><td class="tot">${n?fmtN(sum(vs)/n):''}</td></tr>`;}).join('')}</tbody></table></div>`;
+  const bars=(list,n,lab)=>{const m=Math.max(1,...list.slice(0,n).map(g=>g.h));return `<div class="hbars">${list.slice(0,n).map((g,i)=>`<div class="hb" title="${esc(g.k)} · ${g.n} lançamentos"><span class="nm"><b>${esc(lab?lab(g):g.k)}</b></span><span class="tr"><i style="width:${(g.h/m*100).toFixed(1)}%;background:${CLS_COR[i%CLS_COR.length]}"></i></span><b>${fmtN(g.h)} h</b></div>`).join('')||'<p class="muted">Sem lançamentos no filtro.</p>'}</div>`;};
+  const colBars=(()=>{const m=Math.max(1,...byCol.slice(0,25).map(g=>g.h));return `<div class="hbars">${byCol.slice(0,25).map(g=>{const c=g.rows[0].colab_id?colab(g.rows[0].colab_id):null;return `<div class="hb" title="${esc(g.k)} · ${g.n} lançamentos${c?'':' · fora do cadastro atual'}"><span class="nm"><b>${esc(short(g.k))}</b> <span class="muted small">${esc(c?areaShort(area(c.areaId)?.nome||''):heArea(g.rows[0]))}</span></span><span class="tr"><i style="width:${(g.h/m*100).toFixed(1)}%;background:${c?'#FFD919':'#8583A8'}"></i></span><b>${fmtN(g.h)} h</b></div>`;}).join('')||'<p class="muted">Sem lançamentos no filtro.</p>'}</div><div class="lgd"><span><i style="background:#FFD919"></i>no cadastro atual</span><span><i style="background:#8583A8"></i>não está no cadastro (desligado/outra equipe)</span></div>`;})();
+  // cruzamento por mês e por pessoa
+  const xm=months.filter(m=>state.escala[m]).map(m=>{const P=state.colaboradores.filter(c=>!ui.hSups.length||ui.hSups.includes(c.supervisaoId||''));const s=saMonth(m,P);const rs=X.filter(x=>x.r.data.startsWith(m));return{m,sa:s.t,ac:s.ac,he:sum(R.filter(r=>r.data.startsWith(m)).map(r=>r.horas)),hin:sum(rs.filter(x=>x.s).map(x=>x.r.horas)),hout:sum(rs.filter(x=>!x.s).map(x=>x.r.horas)),din:new Set(rs.filter(x=>x.s).map(x=>x.r.colab_id+x.r.data)).size};});
+  const xmT=`<div class="tw"><table class="t"><thead><tr><th>Mês</th><th style="text-align:right">Sobreaviso na escala</th><th style="text-align:right">HE justificada</th><th style="text-align:right">HE em sobreaviso</th><th style="text-align:right">HE fora do sobreaviso</th><th style="text-align:right">Dias acionados (HE)</th><th style="text-align:right">Acionados marcados ⚡</th><th style="text-align:right">HE / sobreaviso</th></tr></thead><tbody>${xm.slice().reverse().map(x=>`<tr><td><b>${ymLabel(x.m)}</b></td><td style="text-align:right">${fmtN(x.sa)} h</td><td style="text-align:right"><b>${fmtN(x.he)} h</b></td><td style="text-align:right">${fmtN(x.hin)} h</td><td style="text-align:right">${fmtN(x.hout)} h</td><td style="text-align:right">${x.din||''}</td><td style="text-align:right">${x.ac||''}${x.din>x.ac?' <span class="badge b-wa" title="Há dias com HE em sobreaviso sem a marcação de acionado na escala">verificar</span>':''}</td><td style="text-align:right">${x.sa?Math.round(x.hin/x.sa*100)+'%':'—'}</td></tr>`).join('')||`<tr><td colspan="8" class="muted">Sem escala detalhada nos meses do filtro (a escala dia a dia existe a partir de jan/2025).</td></tr>`}</tbody></table></div>`;
+  const pc=grpSum(X.map(x=>x.r),r=>r.colab_id).map(g=>{const c=colab(g.k);const ms=new Set(g.rows.map(r=>r.data.slice(0,7)));const saH=sum([...ms].map(m=>monthStat(g.k,m)?.sa||0));const hin=sum(X.filter(x=>x.s&&x.r.colab_id===g.k).map(x=>x.r.horas));return{c,he:g.h,hin,hout:g.h-hin,saH};}).filter(x=>x.c).sort((a,b)=>b.he-a.he).slice(0,20);
+  const pcT=`<div class="tw"><table class="t"><thead><tr><th>Colaborador</th><th style="text-align:right">HE (meses com escala)</th><th style="text-align:right">Em sobreaviso</th><th style="text-align:right">Fora do sobreaviso</th><th style="text-align:right">Sobreaviso nesses meses</th></tr></thead><tbody>${pc.map(x=>`<tr><td><b>${esc(x.c.nome)}</b> <span class="muted small">${esc(areaShort(area(x.c.areaId)?.nome||''))}</span></td><td style="text-align:right"><b>${fmtN(x.he)} h</b></td><td style="text-align:right">${fmtN(x.hin)} h</td><td style="text-align:right">${x.hout>0?`<span class="badge ${x.hout>x.hin?'b-wa':''}">${fmtN(x.hout)} h</span>`:'—'}</td><td style="text-align:right">${fmtN(x.saH)} h</td></tr>`).join('')||'<tr><td colspan="5" class="muted">Sem dados cruzáveis no filtro.</td></tr>'}</tbody></table></div>`;
+  const fCount=['heArea','heCol','heCls','heTur','hSups'].filter(k=>ui[k].length).length;
+  return histHead(tools)+fbar(fil,fCount?`<button class="btn sm gh" data-act="heLimpar">Limpar filtros (${fCount})</button>`:'')+
+  `<div class="breadcrumb"><span>Controle manual de justificativa de horas (planilha Estudo de Horas Extras) · 2023 em diante</span><span class="r">${periodoLabel(months)} · ${R.length} lançamentos · base com ${HE.length} lançamentos</span></div>`+
+  `<div class="esc-titulo">Resultado consolidado <b>Horas extras justificadas — ${ui.heArea.length===1?esc(ui.heArea[0]):'Consolidado'}</b></div>`+
+  hub([hubIt('clock','Horas extras',fmtN(H)+' h',`${R.length} lançamentos · média de ${fmtN(months.length?H/months.length:0)} h/mês`),
+       hubIt('users','Colaboradores',pes.size,`${fmtN(pes.size?H/pes.size:0)} h por pessoa · ${mesesCom} meses com lançamento`),
+       hubIt('moon','Noturno e madrugada',fmtN(notH)+' h',H?`${Math.round(notH/H*100)}% das horas · ${fmtN(fds)} h em fins de semana/feriados`:'')],
+      {segs,k:'Por classificação',v:byCls[0]?Math.round(byCls[0].h/(H||1)*100)+'%':'—',s:byCls[0]?esc(byCls[0].k):'sem lançamentos',pill:''},
+      [hubIt('trend','Maior volume',top?esc(short(top.k)):'—',top?`${fmtN(top.h)} h · ${top.n} lançamentos`:''),
+       hubIt('bolt','HE em sobreaviso',fmtN(xIn)+' h',X.length?`${Math.round(xIn/((xIn+xOut)||1)*100)}% da HE cruzável caiu em dia de sobreaviso`:'cruzamento a partir de jan/2025',{cls:''}),
+       hubIt('alert','HE fora do sobreaviso',fmtN(xOut)+' h','dias sem sobreaviso lançado na escala',{cls:xOut>xIn?'at':''})])+
+  secdiv(1,'Evolução mês a mês','horas extras justificadas por mês, por turno de término')+`<div class="card"><h3>Horas extras por mês</h3>${chart}</div>`+
+  secdiv(2,'Comparativo por ano','soma de horas por mês em cada ano escolhido no filtro')+`<div class="card"><h3>Ano x mês (horas)</h3>${ym}</div>`+
+  secdiv(3,'Quem e por quê','colaboradores, classificações e motivos mais frequentes')+`<div class="card"><h3>Por colaborador · top 25</h3>${colBars}</div><div class="cols"><div class="card"><h3>Por classificação</h3>${bars(byCls,10)}</div><div class="card"><h3>Motivos mais frequentes</h3>${bars(byMot,10,g=>g.k.length>60?g.k.slice(0,60)+'…':g.k)}</div></div>`+
+  secdiv(4,'Cruzamento com a escala','HE justificada x sobreaviso lançado na ferramenta (mesmo dia, ou madrugada depois de uma noite de sobreaviso)')+`<div class="card"><h3>Por mês</h3>${xmT}<p class="hint">“Dias acionados (HE)” conta pessoa + dia com HE em sobreaviso; quando é maior que os acionamentos marcados com ⚡ na escala, falta marcar acionamento (e a folga do dia seguinte).</p></div><div class="card"><h3>Por colaborador · top 20</h3>${pcT}</div>`;
+}
+ACT.heLimpar=()=>{['heArea','heCol','heCls','heTur','hSups'].forEach(k=>ui[k]=[]);persistUI();render();};
+ACT.copyHE=()=>{const L=[['Data','Colaborador','Função','Motivo','Início','Término','Horas','Classificação','Turno','Cidade','Área (planilha)','Em sobreaviso'].join('\t')];heRows().forEach(r=>{const s=heEmSA(r);L.push([fmt(r.data),r.colaborador,r.funcao,String(r.motivo||'').replace(/\s+/g,' '),r.inicio,r.termino,String(r.horas).replace('.',','),r.classificacao,r.turno,r.cidade,heArea(r),s===null?'':s?'sim':'não'].join('\t'));});copyText(L.join('\n'));};
+
+/* importação da planilha (admin) — aba Base */
+function loadScript(src){return new Promise((ok,ko)=>{if(document.querySelector(`script[src="${src}"]`))return ok();const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>ko(new Error('não foi possível carregar '+src));document.head.appendChild(s);});}
+const nrm=s=>String(s||'').normalize('NFKD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+const STOP=new Set(['DE','DA','DOS','DO','DAS','E']);
+function matchColab(n){const N=nrm(n),t=new Set(N.split(' ').filter(x=>!STOP.has(x)));let best=null,bs=0;
+  for(const c of state.colaboradores){const cn=nrm(c.nome);if(cn===N)return c.id;const ct=new Set(cn.split(' ').filter(x=>!STOP.has(x)));const sc=[...t].filter(x=>ct.has(x)).length;if(sc>bs&&sc>=2&&N.split(' ')[0]===cn.split(' ')[0]){best=c.id;bs=sc;}}return best;}
+ACT.heImport=async el=>{if(!isAdmin())return deny();const f=el.files&&el.files[0];el.value='';if(!f)return;
+  try{toast('Lendo a planilha…');await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+    const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});const ws=wb.Sheets['Base']||wb.Sheets[wb.SheetNames[0]];const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true});
+    const tm=v=>typeof v==='number'?Math.round((v%1)*1440)%1440:null;const hm=m=>m==null?'':`${pad(Math.floor(m/60))}:${pad(m%60)}`;const hoje=todayS();const out=[];
+    for(const r of rows.slice(1)){const d=r[0];if(typeof d!=='number')continue;const p=XLSX.SSF.parse_date_code(d);if(!p)continue;const ds=`${p.y}-${pad(p.m)}-${pad(p.d)}`;if(ds<'2023-01-01'||ds>hoje)continue;
+      const a=tm(r[5]),b=tm(r[6]);let h=typeof r[7]==='number'?(r[7]<3?r[7]*24:null):null;if(h==null&&a!=null&&b!=null)h=(((b-a)%1440)+1440)%1440/60;if(!h||h<=0||h>48)continue;
+      const nome=String(r[2]||'').replace(/\s+/g,' ').trim();if(!nome)continue;let T=nrm(r[9]).replace('SEMI NOTURNO','SEMI-NOTURNO').replace('NOTURN0','NOTURNO');T=T&&T!=='NONE'?T.toLowerCase().replace(/(^|-)\w/g,x=>x.toUpperCase()):'';
+      let sp=String(r[14]??'').trim();if(sp.startsWith('#')||sp==='None')sp='';if(sp==='Fo')sp='FO';const cid=String(r[11]??'').replace(/\s+/g,' ').trim();
+      out.push({data:ds,colaborador:nome===nome.toUpperCase()?nome.toLowerCase().replace(/(^|\s)\S/g,x=>x.toUpperCase()):nome,colab_id:matchColab(nome),funcao:String(r[3]||'').trim(),motivo:String(r[4]||'').trim().slice(0,300),inicio:hm(a),termino:hm(b),horas:Math.round(h*1e4)/1e4,classificacao:String(r[8]||'').trim()||'Não classificado',turno:T,cidade:cid&&cid!=='None'?cid:'',supervisao:sp});}
+    if(!out.length){toast('Nenhum lançamento válido (2023 em diante) encontrado na aba Base.');return;}
+    const yrs={};out.forEach(o=>{const y=o.data.slice(0,4);yrs[y]=(yrs[y]||0)+o.horas;});
+    confirmBox('Atualizar horas extras?',`Foram lidos <b>${out.length}</b> lançamentos (${Object.entries(yrs).map(([y,h])=>`${y}: ${fmtN(h)} h`).join(' · ')}). A base atual de 2023 em diante (${HE?HE.length:0} lançamentos) será substituída.`,'Substituir base',async()=>{
+      toast('Gravando…');let r=await sb.from('horas_extras').delete().gte('data','2023-01-01');if(r.error)return toast(r.error.message);
+      for(let i=0;i<out.length;i+=500){r=await sb.from('horas_extras').insert(out.slice(i,i+500));if(r.error)return toast('Erro ao gravar: '+r.error.message);}
+      HE=null;await loadHE();toast(`Base de horas extras atualizada · ${out.length} lançamentos`);});
+  }catch(e){toast('Erro ao ler a planilha: '+(e.message||e));}};
+
+/* ---------- compartilhar a escala ---------- */
+const SHARE={tipo:'fds',fone:true,ferias:true};
+function feriasDoMes(ym,aList){const a=ym+'-01',b=ym+'-'+pad(daysInMonth(ym));const ids=new Set(aList?state.colaboradores.filter(c=>aList.some(x=>x.id===c.areaId)||c.funcao!=='tecnico').map(c=>c.id):state.colaboradores.map(c=>c.id));
+  return state.ferias.filter(f=>f.dias>0&&f.inicio&&ids.has(f.colabId)&&f.inicio<=b&&add(f.inicio,f.dias-1)>=a).map(f=>({f,c:colab(f.colabId),ini:f.inicio,fim:add(f.inicio,f.dias-1)})).filter(x=>x.c).sort((x,y)=>cmp(x.ini,y.ini));}
+function feriasBox(ym,aList){const fs=feriasDoMes(ym,aList),t=todayS();return `<div class="sh-sec"><h4>De férias em ${ymLabel(ym).toLowerCase()}</h4>${fs.length?`<table class="sh-t"><thead><tr><th>Colaborador</th><th>Área / função</th><th>Período</th><th>Dias</th><th>Retorno</th></tr></thead><tbody>${fs.map(x=>`<tr${x.ini<=t&&x.fim>=t?' class="now"':''}><td><b>${esc(x.c.nome)}</b>${x.ini<=t&&x.fim>=t?' <span class="sh-pill">de férias agora</span>':''}</td><td>${esc(x.c.funcao!=='tecnico'?FUNC[x.c.funcao]:areaShort(area(x.c.areaId)?.nome||''))}</td><td>${fmt(x.ini)} a ${fmt(x.fim)}</td><td>${x.f.dias}</td><td>${fmt(nextWork(x.fim))}</td></tr>`).join('')}</tbody></table>`:'<p class="sh-m">Ninguém de férias no mês.</p>'}</div>`;}
+function shareHtml(){const ym=ui.ym,aList=ui.areaId?[area(ui.areaId)]:areasSorted(),fone=SHARE.fone;const tit=`Escala de plantão · ${ymLabel(ym)}`;const sub=`Planta Interna SP${ui.areaId?' · '+esc(area(ui.areaId).nome):''} · gerado em ${fmt(todayS())}`;
+  let body='';
+  if(SHARE.tipo==='full'){const days=monthDays(ym);
+    body=`<table class="sh-g"><thead><tr><th class="nm">Colaborador</th>${days.map(d=>`<th class="${isHol(d)?'hol':isWE(d)?'we':''}">${+d.slice(8)}<br><small>${DS1[dow(d)]}</small></th>`).join('')}<th>Horas</th></tr></thead><tbody>${aList.map(a=>{const cs=colabsOfArea(a.id,ym);return `<tr class="grp"><td colspan="${days.length+2}">${esc(a.nome)}</td></tr>`+cs.map(c=>{let h=0;const tds=days.map(d=>{const v=getV(c.id,d),vac=onVac(c.id,d);if(isNum(v))h+=v;const lab=vac&&!v?'FE':v==null?'':String(v);const k=isNum(v)?'sa':v==='J3'?'j3':vac||v==='FE'?'fe':v?'ot':'';return `<td class="${isHol(d)?'hol':isWE(d)?'we':''}">${lab?`<span class="c ${k}">${lab}${isAc(c.id,d)?'⚡':''}</span>`:''}</td>`;}).join('');return `<tr><td class="nm"><b>${esc(short(c.nome))}</b>${fone&&c.telefone?`<small>${esc(c.telefone)}</small>`:''}</td>${tds}<td class="h">${h?h+'h':''}</td></tr>`;}).join('');}).join('')}</tbody></table>
+    <div class="sh-lg"><span><i class="c sa">24</i>horas de sobreaviso</span><span><i class="c j3">J3</i>plantão 08h–17h</span><span><i class="c ot">FO</i>folga / BH / FA / AT</span><span><i class="c fe">FE</i>férias</span><span>⚡ acionado</span></div>`;}
+  else{const bl=blocksAll(ym).filter(b=>b.dias.some(d=>d.slice(0,7)===ym));
+    body=`<div class="sh-wk">${bl.map(b=>{const ln=aList.map(a=>{const p=blockPeople(a.id,b);if(!p.J3.length&&!p.SA.length)return '';return `<div class="sh-a"><div class="an">${esc(areaShort(a.nome))}</div>${p.J3.map(c=>`<div class="pp"><span class="c j3">J3</span><b>${esc(short(c.nome))}</b>${fone&&c.telefone?`<small>${esc(c.telefone)}</small>`:''}</div>`).join('')}${p.SA.map(x=>`<div class="pp"><span class="c sa">${x.h}h</span><b>${esc(short(x.c.nome))}</b><em>${x.days.map(d=>DSEM[dow(d)]).join(' · ')}</em>${fone&&x.c.telefone?`<small>${esc(x.c.telefone)}</small>`:''}</div>`).join('')}</div>`;}).join('');
+      const hn=b.dias.filter(isHol).map(d=>holName(d));return `<div class="sh-b"><h5>${diasLabel(b.dias)}${hn.length?` <span class="sh-pill">${esc(hn.join(', '))}</span>`:''}</h5>${ln||'<p class="sh-m">Sem plantonistas lançados</p>'}</div>`;}).join('')}</div>`;}
+  return `<div class="sheet ${SHARE.tipo}" id="shareSheet"><div class="sh-hd"><div class="sh-logo"></div><div><h3>${tit}</h3><div class="sh-m">${sub}</div></div><div class="sh-tg">${SHARE.tipo==='full'?'Escala completa':'Plantonistas por fim de semana e feriado'}</div></div>${body}${SHARE.ferias?feriasBox(ym,ui.areaId?aList:null):''}<div class="sh-ft">Gestão Equipe · Planta Interna SP · V.tal</div></div>`;}
+function shareText(){const ym=ui.ym,aList=ui.areaId?[area(ui.areaId)]:areasSorted();const L=[`*Escala de plantão · ${ymLabel(ym)}*`,`Planta Interna SP${ui.areaId?' · '+area(ui.areaId).nome:''}`,''];
+  blocksAll(ym).filter(b=>b.dias.some(d=>d.slice(0,7)===ym)).forEach(b=>{L.push(`*${diasLabel(b.dias)}*${b.dias.some(isHol)?' ('+b.dias.filter(isHol).map(holName).join(', ')+')':''}`);aList.forEach(a=>{const p=blockPeople(a.id,b);if(!p.J3.length&&!p.SA.length)return;L.push(`_${areaShort(a.nome)}_`);p.J3.forEach(c=>L.push(`• J3 08h–17h: ${short(c.nome)}${SHARE.fone&&c.telefone?' · '+c.telefone:''}`));p.SA.forEach(x=>L.push(`• Sobreaviso ${x.h}h (${x.days.map(d=>DSEM[dow(d)]).join('/')}): ${short(x.c.nome)}${SHARE.fone&&x.c.telefone?' · '+x.c.telefone:''}`));});L.push('');});
+  if(SHARE.ferias){const fs=feriasDoMes(ym,ui.areaId?aList:null);L.push('*De férias no mês*');if(!fs.length)L.push('• ninguém');fs.forEach(x=>L.push(`• ${short(x.c.nome)}: ${fmtS(x.ini)} a ${fmtS(x.fim)} (${x.f.dias} dias)`));}
+  return L.join('\n');}
+async function sheetCanvas(){await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');const el=document.getElementById('shareSheet');
+  return html2canvas(el,{backgroundColor:'#ffffff',scale:2,width:el.scrollWidth,height:el.scrollHeight,windowWidth:el.scrollWidth+80,onclone:d=>{const s=d.getElementById('shareSheet');let p=s.parentElement;while(p){p.style.overflow='visible';p.style.maxHeight='none';p=p.parentElement;}}});}
+function openShare(tipo){SHARE.tipo=tipo;MS.k=null;render();openModal({wide:true,cls:'share',render:()=>`${mHead('Compartilhar escala')}<div class="mb"><div class="share-ctl"><div class="seg2"><button class="${SHARE.tipo==='full'?'on':''}" data-act="tipo" data-v="full">Escala completa</button><button class="${SHARE.tipo==='fds'?'on':''}" data-act="tipo" data-v="fds">Fins de semana e feriados</button></div><label class="chk"><input type="checkbox" data-k="fone" ${SHARE.fone?'checked':''}> Mostrar telefones</label><label class="chk"><input type="checkbox" data-k="ferias" ${SHARE.ferias?'checked':''}> Incluir férias do mês</label></div><div class="share-prev">${shareHtml()}</div></div><div class="mf"><span class="hint">Imagem para WhatsApp/Teams, PDF pela impressão ou texto.</span><span class="sp"></span><button class="btn gh" data-act="txt">Copiar texto</button><button class="btn" data-act="print">Imprimir / PDF</button><button class="btn" data-act="cpimg">Copiar imagem</button><button class="btn pri" data-act="png">Baixar imagem</button></div>`,
+  change(el){SHARE[el.dataset.k]=el.checked;drawModal();},
+  async act(a,el){if(a==='close')return closeModal();if(a==='tipo'){SHARE.tipo=el.dataset.v;return drawModal();}
+    if(a==='txt')return copyText(shareText());
+    if(a==='print'){document.body.classList.add('printing',SHARE.tipo==='full'?'pr-land':'pr-port');const off=()=>{document.body.classList.remove('printing','pr-land','pr-port');window.removeEventListener('afterprint',off);};window.addEventListener('afterprint',off);setTimeout(()=>{window.print();setTimeout(off,1500);},50);return;}
+    try{el.disabled=true;const cv=await sheetCanvas();const nome=`escala-${SHARE.tipo==='full'?'completa':'fins-de-semana'}-${ui.ym}.png`;
+      if(a==='png'){const l=document.createElement('a');l.download=nome;l.href=cv.toDataURL('image/png');l.click();toast('Imagem baixada');}
+      if(a==='cpimg'){const blob=await new Promise(r=>cv.toBlob(r,'image/png'));if(!window.ClipboardItem||!navigator.clipboard?.write)throw new Error('seu navegador não permite copiar imagem — use Baixar imagem');await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);toast('Imagem copiada — cole no WhatsApp ou Teams');}
+    }catch(e){toast('Não foi possível gerar a imagem: '+(e.message||e));}finally{el.disabled=false;}}});}
+Object.assign(ACT,{shareMenu:()=>{MS.k=MS.k==='share'?null:'share';render();},share:el=>openShare(el.dataset.v)});
+const shareBtn=()=>`<div class="ms share ${MS.k==='share'?'open':''}"><button type="button" class="btn gh" data-act="shareMenu" title="Compartilhar a escala do mês">↗ Compartilhar</button>${MS.k==='share'?`<div class="ms-p right"><div class="ms-list"><div class="ms-o" data-act="share" data-v="full"><span class="t"><b>Escala completa</b><br><small class="muted">mês inteiro, todos os dias + férias</small></span></div><div class="ms-o" data-act="share" data-v="fds"><span class="t"><b>Plantonistas por fim de semana e feriado</b><br><small class="muted">J3 e sobreaviso de cada bloco + férias</small></span></div></div></div>`:''}</div>`;
+
+/* ---------- metas em Configurações ---------- */
+function metasCard(){const ms=metas();return `<div class="card"><h3>Meta de sobreaviso</h3><p class="hint" style="margin-top:0">Horas de sobreaviso da equipe toda por mês. Cada meta vale a partir do mês informado até a próxima.</p><div class="tw"><table class="t"><thead><tr><th>Vale a partir de</th><th>Meta (h/mês)</th><th></th></tr></thead><tbody>${ms.map((m,i)=>`<tr><td>${m.desde<'2001'?'início (sem data)':`<input type="month" value="${m.desde}" data-chg="metaSet" data-i="${i}" data-f="desde" ${isAdmin()?'':'disabled'}>`}</td><td><input type="number" min="0" step="50" value="${m.valor}" data-chg="metaSet" data-i="${i}" data-f="valor" style="width:110px" ${isAdmin()?'':'disabled'}></td><td>${i&&isAdmin()?`<button class="btn sm gh" data-act="metaDel" data-i="${i}">Remover</button>`:''}</td></tr>`).join('')}</tbody></table></div><div class="bar needs-admin" style="margin-top:10px"><button class="btn" data-act="metaAdd">+ Nova vigência</button></div></div>`;}
+Object.assign(ACT,{
+  metaSet:el=>{if(!isAdmin())return deny();const ms=metas();const m=ms[+el.dataset.i];if(el.dataset.f==='valor')m.valor=Math.max(0,+el.value||0);else if(/^\d{4}-\d{2}$/.test(el.value))m.desde=el.value;state.config.metasSobreaviso=ms;touch();render();toast('Meta atualizada');},
+  metaAdd:()=>{if(!isAdmin())return deny();const ms=metas();ms.push({desde:ymAdd(curYm(),1),valor:ms[ms.length-1].valor});state.config.metasSobreaviso=ms;touch();render();},
+  metaDel:el=>{if(!isAdmin())return deny();const ms=metas();ms.splice(+el.dataset.i,1);state.config.metasSobreaviso=ms;touch();render();}
+});
 
 /* ================= login ================= */
 let LOGIN={mode:'entrar',msg:'',err:''};
