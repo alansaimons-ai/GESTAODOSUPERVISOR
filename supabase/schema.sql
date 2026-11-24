@@ -13,6 +13,7 @@ create table if not exists public.profiles (
   nome text,
   role text not null default 'leitura' check (role in ('admin','supervisor','leitura')),
   supervisao_id text,
+  telefone text,
   created_at timestamptz not null default now()
 );
 
@@ -111,8 +112,10 @@ begin
   if lower(new.email) not like '%@vtal.com' then
     raise exception 'Cadastro permitido somente com e-mail @vtal.com';
   end if;
-  insert into public.profiles(id, email, nome, role)
-  values (new.id, lower(new.email), coalesce(new.raw_user_meta_data ->> 'nome', split_part(new.email,'@',1)),
+  insert into public.profiles(id, email, nome, telefone, role)
+  values (new.id, lower(new.email),
+          coalesce(nullif(new.raw_user_meta_data ->> 'nome',''), split_part(new.email,'@',1)),
+          nullif(new.raw_user_meta_data ->> 'telefone',''),
           case when lower(new.email) in (select lower(valor #>> '{}') from public.config where chave like 'admin_inicial%') then 'admin' else 'leitura' end)
   on conflict (id) do nothing;
   return new;

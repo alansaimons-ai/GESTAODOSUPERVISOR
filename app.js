@@ -91,11 +91,20 @@ function nightTargets(a,ym){const md=monthDays(ym).filter(isWork);if(a.noturnoMo
 function inBlock(cid,b){const r={J3:false,SA:false,h:0};b.dias.forEach(d=>{const v=getV(cid,d);if(v==='J3')r.J3=true;else if(isNum(v)){r.SA=true;r.h+=v;}});return r;}
 
 /* ================= gerador ================= */
+/* folga de férias: sem plantão nos N dias antes do início das férias nem nos M dias após o retorno */
+const vacBuf=()=>({antes:state.config.semPlantaoAntesFerias==null?3:+state.config.semPlantaoAntesFerias,depois:state.config.semPlantaoAposFerias==null?1:+state.config.semPlantaoAposFerias});
+function nearVac(cid,start,end){const v=IDX.vac[cid];if(!v||!v.size)return null;const B=vacBuf();
+  for(let i=1;i<=B.antes;i++){const d=add(end,i);if(v.has(d)&&!v.has(add(d,-1)))return{tipo:'antes',d};}
+  for(let i=1;i<=B.depois;i++){const d=add(start,-i);if(v.has(d)&&!v.has(add(d,1)))return{tipo:'depois',d};}
+  return null;}
+function limparMes(ym,aid){
+  const cs=colabsOfArea(aid,ym);const own=ownedDays(ym);const prevBlocks=blocksOfMonth(ymAdd(ym,-1));
+  const protect=new Set();prevBlocks.forEach(b=>cs.forEach(c=>{const r=inBlock(c.id,b);if(r.J3||r.SA)protect.add(c.id+'|'+b.folgaDepois);}));
+  let n=0;cs.forEach(c=>own.forEach(d=>{const v=getV(c.id,d);if(v==='J3'||isNum(v)||(v==='FO'&&!protect.has(c.id+'|'+d))){setV(c.id,d,null);n++;}}));return n;}
 function gerarEscala(ym,aid){
   const a=area(aid);buildIdx();
   const cs=escalaveis(aid);const own=ownedDays(ym);const blocks=blocksAll(ym);const prevBlocks=blocksOfMonth(ymAdd(ym,-1));
-  const protect=new Set();prevBlocks.forEach(b=>cs.forEach(c=>{const r=inBlock(c.id,b);if(r.J3||r.SA)protect.add(c.id+'|'+b.folgaDepois);}));
-  cs.forEach(c=>own.forEach(d=>{const v=getV(c.id,d);if(v==='J3'||isNum(v)||(v==='FO'&&!protect.has(c.id+'|'+d)))setV(c.id,d,null);}));
+  limparMes(ym,aid);
   const mStart=ym+'-01',h90Start=add(mStart,-90);
   const H={};cs.forEach(c=>H[c.id]={last:{J3:'',SA:''},wk:new Set(),h90:0,m:0,ms:{J3:0,SA:0},night:0,r:Math.random()});
   Object.keys(state.escala).forEach(m=>{const mm=state.escala[m];cs.forEach(c=>{const cells=mm[c.id];if(!cells)return;for(const dd in cells){const d=m+'-'+dd,v=cells[dd];if(m===ym&&own.has(d))continue;const h=H[c.id];
@@ -111,20 +120,20 @@ function gerarEscala(ym,aid){
     const used=new Set();
     const jd=j3Days(b);
     if(!b.iso&&jd.length)for(let i=0;i<a.j3Vagas;i++){
-      const ok=order('J3',b,cs.filter(c=>c.j3&&!used.has(c.id)&&freeDays(c,jd)&&!vacIn(c,b.folgaAntes,b.folgaDepois)));
+      const base=cs.filter(c=>c.j3&&!used.has(c.id)&&freeDays(c,jd)&&!vacIn(c,b.folgaAntes,b.folgaDepois));let ok=order('J3',b,base.filter(c=>!nearVac(c.id,b.start,b.end)));if(!ok.length)ok=order('J3',b,base);
       const c=ok[0];if(!c){missing.push(`${diasLabel(b.dias)}: sem colaborador para J3`);continue;}
       jd.forEach(d=>setV(c.id,d,'J3'));if(a.folgaJ3){putFO(c,b.folgaAntes);putFO(c,b.folgaDepois);}used.add(c.id);mark(c,'J3',b);
     }
     if(a.saModo==='dia'||b.iso){
       for(const d of b.dias)for(let i=0;i<a.saVagas;i++){
-        const cand=cs.filter(c=>c.sa!==false&&freeDays(c,[d]));
+        let cand=cs.filter(c=>c.sa!==false&&freeDays(c,[d]));const cv=cand.filter(c=>!nearVac(c.id,b.start,b.end));if(cv.length)cand=cv;
         let ok=order('SA',b,cand.filter(c=>!used.has(c.id)));if(!ok.length)ok=order('SA',b,cand);
         const c=ok[0];if(!c){missing.push(`${DSEM[dow(d)]} ${fmtS(d)}: sem colaborador para sobreaviso`);continue;}
         setV(c.id,d,hoursFor(a,d));if(!used.has(c.id)){if(a.folgaSA&&!b.iso)putFO(c,b.folgaAntes);mark(c,'SA',b);}used.add(c.id);
       }
     }else{
       for(let i=0;i<a.saVagas;i++){
-        const ok=order('SA',b,cs.filter(c=>c.sa!==false&&!used.has(c.id)&&freeDays(c,b.dias)&&!vacIn(c,b.folgaAntes,b.end)));
+        const base=cs.filter(c=>c.sa!==false&&!used.has(c.id)&&freeDays(c,b.dias)&&!vacIn(c,b.folgaAntes,b.end));let ok=order('SA',b,base.filter(c=>!nearVac(c.id,b.start,b.end)));if(!ok.length)ok=order('SA',b,base);
         const c=ok[0];if(!c){missing.push(`${diasLabel(b.dias)}: sem colaborador para sobreaviso`);continue;}
         b.dias.forEach(d=>setV(c.id,d,hoursFor(a,d)));if(a.folgaSA)putFO(c,b.folgaAntes);used.add(c.id);mark(c,'SA',b);
       }
@@ -137,8 +146,8 @@ function gerarEscala(ym,aid){
       const w=dow(d);let pref=[];
       if(w>=4){const nb=allB.find(b=>b.start>d&&ddiff(d,b.start)<=3);if(nb)pref=cs.filter(c=>isNum(getV(c.id,nb.dias[0])));}
       else{const pb=allB.filter(b=>b.end<d&&ddiff(b.end,d)<=3).pop();if(pb)pref=cs.filter(c=>isNum(getV(c.id,pb.end)));}
-      let c=pref.find(c=>freeDays(c,[d]));
-      if(!c){const ok=cs.filter(c=>c.sa!==false&&freeDays(c,[d])).sort((x,y)=>H[x.id].night-H[y.id].night||H[x.id].m-H[y.id].m||H[x.id].r-H[y.id].r);c=ok[0];}
+      let c=pref.find(c=>freeDays(c,[d])&&!nearVac(c.id,d,d));
+      if(!c){let ok=cs.filter(c=>c.sa!==false&&freeDays(c,[d]));const ov=ok.filter(c=>!nearVac(c.id,d,d));if(ov.length)ok=ov;ok=ok.sort((x,y)=>H[x.id].night-H[y.id].night||H[x.id].m-H[y.id].m||H[x.id].r-H[y.id].r);c=ok[0];}
       if(!c){missing.push(`${DSEM[w]} ${fmtS(d)}: noite sem sobreaviso`);return;}
       setV(c.id,d,a.noturnoH);H[c.id].night+=a.noturnoH;
     });
@@ -172,11 +181,13 @@ function escalaAlerts(ym,aid){
     if(!small&&s>1)out.push({lvl:'warn',msg:`${c.nome}: ${s} fins de semana de sobreaviso no mês`});
     bym.forEach((b,i)=>{const r=regs[i];if(!small&&(r.J3||r.SA)&&i>0&&(regs[i-1].J3||regs[i-1].SA)&&ddiff(bym[i-1].key,b.key)===7)out.push({lvl:'info',msg:`${c.nome}: plantão em fins de semana seguidos (${fmtS(bym[i-1].key)} e ${fmtS(b.key)})`});
       if((r.J3||r.SA)&&b.dias.some(d=>onVac(c.id,d)&&(getV(c.id,d)==='J3'||isNum(getV(c.id,d)))))out.push({lvl:'err',msg:`${c.nome}: escalado em ${fmtS(b.key)} durante as férias`});
+      if(r.J3||r.SA){const nv=nearVac(c.id,b.start,b.end);if(nv)out.push({lvl:'warn',msg:nv.tipo==='antes'?`${c.nome}: plantão em ${fmtS(b.key)} na véspera das férias (início ${fmtS(nv.d)})`:`${c.nome}: plantão em ${fmtS(b.key)} logo após o retorno das férias (${fmtS(nv.d)})`});}
       if(r.SA&&b.dias.some(d=>isAc(c.id,d))&&getV(c.id,b.folgaDepois)!=='FO')out.push({lvl:'warn',msg:`${c.nome}: sobreaviso de ${fmtS(b.key)} acionado sem folga pós-plantão (${fmtS(b.folgaDepois)})`});});
   });
   const esc=escalaveis(aid);const cnt=c=>bym.filter(b=>{const r=inBlock(c.id,b);return r.J3||r.SA;}).length;
   const zero=esc.filter(c=>cnt(c)===0&&!bym.every(b=>b.dias.some(d=>onVac(c.id,d)))),two=esc.filter(c=>cnt(c)>1);
   if(!small&&zero.length&&two.length)out.push({lvl:'warn',msg:`Distribuição desigual: ${two.map(c=>first(c.nome)).join(', ')} com 2+ fins de semana enquanto ${zero.map(c=>first(c.nome)).join(', ')} sem nenhum.`});
+  esc.forEach(c=>monthDays(ym).forEach(d=>{if(isWork(d)&&isNum(getV(c.id,d))&&!onVac(c.id,d)&&onVac(c.id,add(d,1)))out.push({lvl:'warn',msg:`${c.nome}: sobreaviso noturno em ${fmtS(d)}, véspera das férias`});}));
   const from=add(ym+'-01',-8),to=add(ym+'-'+pad(daysInMonth(ym)),8);
   esc.forEach(c=>{let run=[];const flush=()=>{if(run.length>6&&run.some(d=>d.startsWith(ym)))out.push({lvl:'err',msg:`${c.nome}: ${run.length} dias seguidos trabalhados (${fmtS(run[0])} a ${fmtS(run[run.length-1])}) — lance uma folga`});run=[];};for(const d of range(from,to)){if(worked(c,d))run.push(d);else flush();}flush();});
   return out;
@@ -331,7 +342,7 @@ async function reloadData(){try{await loadAll();render();}catch(e){toast('Erro a
 function setStatus(s){saveSt=s;const el=$('#savest');if(el)el.innerHTML=saveStatusHtml();}
 function saveStatusHtml(){
   const m={dirty:['w','Salvando em instantes…'],saving:['w','Salvando…'],saved:['','Salvo no banco'],err:['e','Erro ao salvar — <button class="btn sm" data-act="saveNow">Tentar de novo</button>']};
-  const[c,t]=m[saveSt]||m.saved;return `<span class="dot ${c}"></span><span>${t}</span><button class="btn sm" data-act="reload" title="Buscar alterações de outros usuários">↻</button>`;
+  const[c,t]=m[saveSt]||m.saved;return `<span class="dot ${c}" title="${t.replace(/<[^>]+>/g,'')}"></span><span class="slbl">${t}</span><button class="btn sm" data-act="reload" title="Buscar alterações de outros usuários">↻</button>`;
 }
 
 /* ================= UI base ================= */
@@ -352,43 +363,173 @@ function tagHtml(v,ac,vac){
   return `<span class="tag ${cls}">${esc(v)}</span>`;
 }
 
+/* ================= layout v3 ================= */
+const SVGI=p=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const IC={
+  geral:SVGI('<path d="M3 11l9-7 9 7v9H3z"/><path d="M9 20v-6h6v6"/>'),
+  escala:SVGI('<rect x="3" y="5" width="18" height="16"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h2M14 14h2M8 17h2"/>'),
+  historico:SVGI('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'),
+  ferias:SVGI('<path d="M12 3a9 9 0 0 1 9 9H3a9 9 0 0 1 9-9z"/><path d="M12 12v8"/><path d="M9 20h6"/>'),
+  cadastros:SVGI('<circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 8h4M19 6v4"/>'),
+  config:SVGI('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>'),
+  users:SVGI('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 2.9-6 6.5-6s6.5 2.5 6.5 6"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2 .6 3.5 2.6 3.5 6"/>'),
+  clock:SVGI('<circle cx="12" cy="13" r="8"/><path d="M12 9v4.5l3 2"/>'),
+  shield:SVGI('<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>'),
+  alert:SVGI('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.1"/>'),
+  beach:SVGI('<path d="M12 3a9 9 0 0 1 9 9H3a9 9 0 0 1 9-9z"/><path d="M12 12v8M9 20h6"/>'),
+  bolt:SVGI('<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>'),
+  trend:SVGI('<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>'),
+  flag:SVGI('<path d="M5 21V4h11l-2 4 2 4H5"/>'),
+  doc:SVGI('<path d="M6 3h9l3 3v15H6z"/><path d="M9 11h6M9 15h6"/>'),
+  sun:SVGI('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  moon:SVGI('<path d="M20 14.5A8 8 0 1 1 9.5 4 6.5 6.5 0 0 0 20 14.5z"/>'),
+  swap:SVGI('<path d="M7 7h13l-3-3M17 17H4l3 3"/>')
+};
+function pageHead(title,ghost,sub,tools){return `<div class="pagehead" data-ghost="${esc(ghost)}"><div><h1>${title}</h1><div class="sub">${sub||''}</div></div>${tools?`<div class="tools">${tools}</div>`:''}</div><div class="wrap">`;}
+const secdiv=(n,t,ds)=>`<div class="secdiv"><div class="n">${n}</div><div><h2>${t}</h2>${ds?`<div class="ds">${ds}</div>`:''}</div><div class="ln"></div></div>`;
+function ringSvg(segs){const R=118,C=2*Math.PI*R,vs=segs.filter(s=>s.v>0),tot=sum(vs.map(s=>s.v))||1;let off=0;const gap=vs.length>1?3:0;
+  return `<svg class="hub-ring" viewBox="0 0 300 300" aria-hidden="true"><circle cx="150" cy="150" r="${R}" fill="none" stroke="var(--glassline)" stroke-width="12"/>`+vs.map(s=>{const L=s.v/tot*C;const el=`<circle cx="150" cy="150" r="${R}" fill="none" stroke="${s.c}" stroke-width="12" stroke-dasharray="${Math.max(0,L-gap).toFixed(1)} ${C.toFixed(1)}" stroke-dashoffset="${(-off).toFixed(1)}" transform="rotate(-90 150 150)"><title>${esc(s.t||'')}</title></circle>`;off+=L;return el;}).join('')+'</svg>';}
+const hubIt=(ic,lbl,v,s,o={})=>`<div class="hub-it ${o.act?'clk':''}" ${o.act?`data-act="${o.act}" ${o.data||''}`:''}><div class="hub-hd">${IC[ic]||''}<span>${lbl}</span></div><div class="hub-bd"><span class="hub-v ${o.cls||''}">${v}</span><span class="hub-s">${s||''}</span></div></div>`;
+const hub=(left,core,right)=>`<div class="hub"><div class="hub-col hub-l">${left.join('')}</div><div class="hub-core">${ringSvg(core.segs)}<div class="hub-in"><div class="k">${core.k}</div><div class="v">${core.v}</div><div class="s">${core.s||''}</div>${core.pill||''}</div></div><div class="hub-col hub-r">${right.join('')}</div></div>`;
+const AREA_COR=['#FFD919','#85A7FF','#C0A1FF','#79D988','#FFB987','#ef4444','#8583A8','#5A11EE','#2E2D39','#00A6A6'];
+const areaShort=n=>String(n||'').replace(/ - SPO - /,' ').replace(/Infraestrutura/g,'Infra').split(' - ').slice(0,2).join(' ');
+const areaCor=id=>{const i=areasSorted().findIndex(a=>a.id===id);return AREA_COR[(i<0?0:i)%AREA_COR.length];};
+const fmtN=n=>(+n||0).toLocaleString('pt-BR',{maximumFractionDigits:1});
+const pct=n=>(n>0?'+':'')+Math.round(n*100)+'%';
+function temaAtual(){return document.documentElement.dataset.theme==='dark'?'dark':'light';}
+function setTema(t){document.documentElement.dataset.theme=t;try{localStorage.setItem('ge_tema',t);}catch(e){}}
+const temaHtml=()=>`<div class="tema" title="Tema da tela"><button data-act="tema" data-v="light" class="${temaAtual()==='light'?'on':''}" aria-label="Tema claro">${IC.sun}</button><button data-act="tema" data-v="dark" class="${temaAtual()==='dark'?'on':''}" aria-label="Tema escuro">${IC.moon}</button></div>`;
+const TABS=[['geral','Visão geral'],['escala','Escala'],['historico','Histórico'],['ferias','Férias'],['cadastros','Cadastros'],['config','Configurações']];
+const tabsFor=()=>ROLE()==='leitura'?TABS.filter(([k])=>!['historico','cadastros','config'].includes(k)):TABS;
+const tabOk=k=>tabsFor().some(([x])=>x===k);
+
+/* ---------- Visão geral ---------- */
+function coberturaMes(ym){let need=0,fill=0;areasSorted().forEach(a=>{const cs=colabsOfArea(a.id,ym);blocksAll(ym).forEach(b=>{
+  if(!b.iso&&a.j3Vagas)j3Days(b).forEach(d=>{need+=a.j3Vagas;fill+=Math.min(a.j3Vagas,cs.filter(c=>getV(c.id,d)==='J3').length);});
+  if(a.saVagas)b.dias.forEach(d=>{need+=a.saVagas;fill+=Math.min(a.saVagas,cs.filter(c=>isNum(getV(c.id,d))).length);});});
+  if(a.noturnoH)nightTargets(a,ym).forEach(d=>{need++;if(cs.some(c=>isNum(getV(c.id,d))))fill++;});});return{need,fill};}
+function rGeral(){
+  const ym=todayS().slice(0,7);
+  let alerts=[];areasSorted().forEach(a=>escalaAlerts(ym,a.id).forEach(x=>{if(x.lvl!=='info')alerts.push({...x,msg:`[${a.nome}] ${x.msg}`});}));
+  const errs=alerts.filter(a=>a.lvl==='err').length;
+  const conf=conflictData(todayS(),add(todayS(),365)).list;const venc=feriasAVencer();
+  const nb=makeBlock(nextBlockKey());
+  const rows=areasSorted().map(a=>{const p=blockPeople(a.id,nb);const nm=c=>`<div><b>${esc(short(c.nome))}</b> <span class="muted small">${esc(c.telefone||'')}</span></div>`;
+    return `<tr><td class="small"><b>${esc(a.nome)}</b></td><td>${p.J3.map(nm).join('')||(a.j3Vagas?'<span class="badge b-er">vago</span>':'<span class="muted small">—</span>')}</td><td>${p.SA.map(x=>`<div><b>${esc(short(x.c.nome))}</b> <span class="badge b-sa">${x.days.map(d=>DS1[dow(d)]+' '+getV(x.c.id,d)+'h').join(' · ')}</span> <span class="muted small">${esc(x.c.telefone||'')}</span></div>`).join('')||'<span class="badge b-er">vago</span>'}</td></tr>`;}).join('');
+  const hrs=sum(activeColabs().map(c=>monthStat(c.id,ym)?.sa||0)),j3d=sum(activeColabs().map(c=>monthStat(c.id,ym)?.j3||0));
+  const emFerias=activeColabs().filter(c=>onVac(c.id,todayS()));
+  const cob=coberturaMes(ym),cp=cob.need?Math.round(cob.fill/cob.need*100):0;
+  const pill=cp>=100?'<span class="pill p-ok">Escala completa</span>':cp>=90?'<span class="pill p-at">Faltam vagas</span>':'<span class="pill p-er">Escala incompleta</span>';
+  return pageHead('Visão geral','Geral',`${DSEM[dow(todayS())]}, ${fmt(todayS())} · Planta Interna SP · escala de ${ymLabel(ym).toLowerCase()}`,`<button class="btn" data-act="copyWk" data-k="${nb.key}">⧉ Mensagem do fim de semana</button>`)+
+  `<div class="esc-titulo">Resultado consolidado <b>Planta Interna SP — ${ymLabel(ym)}</b></div>`+
+  hub([hubIt('users','Colaboradores ativos',activeColabs().length,`${activeColabs().filter(c=>c.funcao==='tecnico').length} técnicos · ${state.areas.length} áreas de plantão`),
+       hubIt('clock','Sobreaviso no mês',fmtN(hrs)+' h','horas à disposição lançadas na escala',{act:'tab',data:'data-v="escala"'}),
+       hubIt('shield','Plantão J3',j3d,'dias de J3 (08h–17h) no mês')],
+      {segs:[{v:cob.fill,c:'#79D988',t:'Vagas preenchidas'},{v:cob.need-cob.fill,c:'#ef4444',t:'Vagas sem plantonista'}],k:'Cobertura da escala',v:cp+'%',s:`${cob.fill} de ${cob.need} vagas de plantão preenchidas`,pill},
+      [hubIt('alert','Alertas da escala',alerts.length,errs?`${errs} críticos — veja abaixo`:'nenhum crítico',{cls:errs?'er':alerts.length?'at':'ok',act:'tab',data:'data-v="escala"'}),
+       hubIt('flag','Conflitos de férias',conf.length,'sobreposições nos próximos 12 meses',{cls:conf.length?'er':'ok',act:'tab',data:'data-v="ferias"'}),
+       hubIt('beach','De férias hoje',emFerias.length,emFerias.map(c=>short(c.nome)).join(', ')||'ninguém')])+
+  secdiv(1,'Próximo fim de semana',`${diasLabel(nb.dias)}${nb.dias.some(isHol)?' · com feriado emendado':''}`)+
+  `<div class="card"><h3>Plantonistas · ${diasLabel(nb.dias)} <button class="btn sm push" data-act="copyWk" data-k="${nb.key}">Copiar mensagem</button></h3><div class="tw"><table class="t"><thead><tr><th>Área</th><th>J3 (08h–17h)</th><th>Sobreaviso</th></tr></thead><tbody>${rows}</tbody></table></div></div>`+
+  secdiv(2,'Pontos de atenção','alertas da escala do mês e conflitos de férias')+
+  `<div class="cols"><div class="card"><h3>Alertas da escala · ${ymLabel(ym)}</h3>${alerts.length?alertHtml(alerts.slice(0,12))+(alerts.length>12?`<p class="hint">+${alerts.length-12} alertas na aba Escala</p>`:''):'<div class="alert ok">Escala dentro das regras.</div>'}</div>
+   <div class="card"><h3>Conflitos de férias</h3>${conf.length?`<div class="tw"><table class="t"><thead><tr><th>Período</th><th>Grupo</th><th>Quem</th></tr></thead><tbody>${conf.map(x=>`<tr><td><span class="badge b-er">${fmtS(x.de)}${x.ate!==x.de?' – '+fmtS(x.ate):''}/${x.de.slice(2,4)}</span></td><td class="small">${esc(x.grupo)}</td><td class="small">${esc(x.nomes)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="alert ok">Nenhuma sobreposição nos próximos 12 meses.</div>'}</div></div>`+
+  secdiv(3,'Férias a vencer','saldos que precisam ser programados nos próximos 150 dias')+
+  `<div class="card"><h3>Férias a vencer</h3>${venc.length?`<div class="tw"><table class="t"><thead><tr><th>Colaborador</th><th>Saldo</th><th>Iniciar até</th><th>Vence</th><th></th></tr></thead><tbody>${venc.map(v=>`<tr><td><b>${esc(v.c.nome)}</b></td><td><span class="badge ${v.p.status==='vencido'?'b-er':'b-wa'}">${v.p.saldo} d</span></td><td class="small">${fmt(v.limite)}</td><td class="small">${fmt(v.p.concFim)}</td><td>${canEditColab(v.c.id)?`<button class="btn sm" data-act="newFer" data-c="${v.c.id}">Lançar</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="alert ok">Nenhum saldo vencendo nos próximos 150 dias.</div>'}</div>`;
+}
+
+/* ---------- Histórico (dashboard) ---------- */
+function histMonths(){const cur=todayS().slice(0,7),y=+cur.slice(0,4);const all=[...new Set([...Object.keys(state.escala),...Object.values(state.histAgg).flatMap(o=>Object.keys(o))])].filter(m=>m<=cur).sort();
+  const p=ui.hp||'12';let a,b=cur;
+  if(p==='ano')a=`${y}-01`;else if(p==='anoant'){a=`${y-1}-01`;b=`${y-1}-12`;}else if(p==='tudo')a=all[0]||cur;else a=ymAdd(cur,1-(+p));
+  const r=[];for(let m=a;m<=b;m=ymAdd(m,1))r.push(m);return r;}
+const HP={'3':'3 meses','6':'6 meses','12':'12 meses',ano:'Ano atual',anoant:'Ano anterior',tudo:'Tudo'};
+const HM={sa:['Horas de sobreaviso','h'],j3:['Dias de J3','d'],fds:['Plantões (fds/feriados)','']};
+function rHist(){
+  const months=histMonths(),cur=todayS().slice(0,7),metric=ui.hm||'sa',mlab=HM[metric];
+  const inSup=c=>!ui.hSup||c.supervisaoId===ui.hSup;
+  const val=(cid,m,k=metric)=>{const s=monthStat(cid,m);if(!s)return 0;return (k==='fds'?s.fds:s[k])||0;};
+  const tot=(cid,k)=>sum(months.map(m=>val(cid,m,k)));
+  const scopeAreas=ui.hArea?[area(ui.hArea)].filter(Boolean):areasSorted();
+  const peopleOf=aid=>state.colaboradores.filter(c=>c.areaId===aid&&inSup(c)&&(c.ativo!==false||months.some(m=>monthStat(c.id,m))));
+  const P=scopeAreas.flatMap(a=>peopleOf(a.id));
+  const areaTot=a=>{const ps=peopleOf(a.id);return{h:sum(ps.map(c=>tot(c.id,'sa'))),f:sum(ps.map(c=>tot(c.id,'fds'))),n:ps.filter(c=>c.ativo!==false).length};};
+  const allTot={h:sum(areasSorted().map(a=>areaTot(a).h))};
+  const H=sum(P.map(c=>tot(c.id,'sa'))),J=sum(P.map(c=>tot(c.id,'j3'))),F=sum(P.map(c=>tot(c.id,'fds')));
+  const act=P.filter(c=>c.ativo!==false&&(c.sa!==false||c.j3));
+  // equilíbrio do rodízio: desvio de cada pessoa vs média da própria área
+  const amean={};scopeAreas.forEach(a=>{const ps=act.filter(c=>c.areaId===a.id);amean[a.id]=ps.length?sum(ps.map(c=>tot(c.id)))/ps.length:0;});
+  const band=c=>{const m=amean[c.areaId];if(!m)return 'ok';const d=Math.abs(tot(c.id)-m)/m;return d<=.2?'ok':d<=.4?'at':'er';};
+  const bc={ok:0,at:0,er:0};act.forEach(c=>bc[band(c)]++);const eqp=act.length?Math.round(bc.ok/act.length*100):0;
+  const eqPill=eqp>=70?'<span class="pill p-ok">No equilíbrio</span>':eqp>=50?'<span class="pill p-at">Atenção</span>':'<span class="pill p-er">Desequilibrado</span>';
+  let ac=0;P.forEach(c=>months.forEach(m=>{const o=state.acionados[m]&&state.acionados[m][c.id];if(o)ac+=Object.keys(o).length;}));
+  let fd=0;const fp=new Set();P.forEach(c=>{const s=IDX.vac[c.id];if(!s)return;s.forEach(d=>{if(months.includes(d.slice(0,7))){fd++;fp.add(c.id);}});});
+  const top=act.slice().sort((a,b)=>tot(b.id,'sa')-tot(a.id,'sa'))[0];
+  const topDev=top&&amean[top.areaId]&&metric==='sa'?(tot(top.id,'sa')-amean[top.areaId])/amean[top.areaId]:null;
+  const mH=months.filter(m=>m<cur);const avgM=mH.length?sum(mH.map(m=>sum(P.map(c=>val(c.id,m,'sa')))))/mH.length:0;const curH=sum(P.map(c=>val(c.id,cur,'sa')));
+  const scopeName=ui.hArea?area(ui.hArea).nome:'Planta Interna SP';const supName=ui.hSup?' · Supervisão '+(sup(ui.hSup)?.nome||''):'';
+  const pLabel=months.length?`${ymShort(months[0])} – ${ymShort(months[months.length-1])}`:'';
+  // escopo
+  const escRow=`<div class="escopo"><div class="esc-row"><button class="esc ${ui.hArea?'':'on'}" data-act="hArea" data-v=""><b>Planta Interna SP</b><span>Consolidado · ${fmtN(allTot.h)} h</span></button>${areasSorted().map(a=>{const t=areaTot(a);return `<button class="esc ${ui.hArea===a.id?'on':''}" data-act="hArea" data-v="${a.id}" title="${esc(a.nome)}"><b>${esc(areaShort(a.nome))}</b><span>${fmtN(t.h)} h · ${t.f} plantões</span></button>`;}).join('')}</div></div>`;
+  const chips=`<div class="fchips"><span class="flbl">Período:</span>${Object.entries(HP).map(([k,l])=>`<button class="chipf ${(ui.hp||'12')===k?'on':''}" data-act="hp" data-v="${k}">${l}</button>`).join('')}<span class="flbl">Supervisão:</span><button class="chipf ${ui.hSup?'':'on'}" data-act="hSup" data-v="">Todas</button>${state.supervisoes.map(s=>`<button class="chipf ${ui.hSup===s.id?'on':''}" data-act="hSup" data-v="${s.id}">${esc(s.nome)}</button>`).join('')}<span class="flbl">Métrica:</span>${Object.entries(HM).map(([k,[l]])=>`<button class="chipf ${metric===k?'on':''}" data-act="hm" data-v="${k}">${l}</button>`).join('')}</div>`;
+  const crumb=`<div class="breadcrumb"><a data-act="hArea" data-v="">Planta Interna SP</a>${ui.hArea?` › <span>${esc(scopeName)}</span>`:''}${ui.hSup?` › <span>${esc(sup(ui.hSup)?.nome||'')}</span>`:''}<span class="r">Período ${pLabel} · ${act.length} colaboradores escaláveis</span></div>`;
+  const meta=`<div class="metabar"><b>Referência do rodízio</b><span>Carga de cada pessoa comparada à média da própria área:</span><span class="pill p-ok">até ±20% equilibrado</span><span class="pill p-at">±20–40% atenção</span><span class="pill p-er">acima de ±40%</span></div>`;
+  // evolução
+  const series=months.map(m=>{const by={};scopeAreas.forEach(a=>by[a.id]=sum(peopleOf(a.id).map(c=>val(c.id,m))));return{m,by,t:sum(Object.values(by)),j3:sum(P.map(c=>val(c.id,m,'j3')))};});
+  const mx=Math.max(1,...series.map(s=>s.t)),avgS=series.length?sum(series.map(s=>s.t))/series.length:0;
+  const chart=`<div class="chart">${series.map(s=>`<div class="cb" data-act="goYm" data-v="${s.m}" title="${ymLabel(s.m)}: ${fmtN(s.t)} ${mlab[1]} — clique para abrir a escala">${s.t?`<span class="vl">${fmtN(s.t)}</span>`:''}<div class="stk" style="height:${(s.t/mx*88).toFixed(1)}%">${scopeAreas.map(a=>s.by[a.id]?`<i style="height:${(s.by[a.id]/s.t*100).toFixed(2)}%;background:${areaCor(a.id)}" title="${esc(a.nome)}: ${fmtN(s.by[a.id])}"></i>`:'').join('')}</div></div>`).join('')}${avgS?`<div class="avg" style="bottom:${(avgS/mx*0.88*220).toFixed(0)}px"><span>média ${fmtN(avgS)}</span></div>`:''}</div><div class="cx">${series.map(s=>`<span>${ymShort(s.m)}</span>`).join('')}</div>${metric!=='j3'?`<div class="cx j3">${series.map(s=>`<span title="dias de J3">${s.j3?'J3 '+s.j3:''}</span>`).join('')}</div>`:''}`;
+  const lgd=scopeAreas.length>1?`<div class="lgd">${scopeAreas.map(a=>`<span><i style="background:${areaCor(a.id)}"></i>${esc(areaShort(a.nome))}</span>`).join('')}</div>`:'';
+  // ranking
+  const rk=act.slice().sort((a,b)=>tot(b.id)-tot(a.id));const rmx=Math.max(1,...rk.map(c=>tot(c.id)),...Object.values(amean));
+  const bcor={ok:'#79D988',at:'#FFB987',er:'#ef4444'};
+  const rank=`<div class="hbars">${rk.map(c=>{const v=tot(c.id),b=band(c),m=amean[c.areaId];return `<div class="hb" title="${esc(c.nome)} · ${esc(area(c.areaId)?.nome||'')} · média da área ${fmtN(m)}"><span class="nm"><b>${esc(short(c.nome))}</b> <span class="muted small">${esc(areaShort(area(c.areaId)?.nome))}</span></span><span class="tr"><i style="width:${(v/rmx*100).toFixed(1)}%;background:${bcor[b]}"></i>${m?`<span class="mk" style="left:${(m/rmx*100).toFixed(1)}%"></span>`:''}</span><b>${fmtN(v)}${mlab[1]?' '+mlab[1]:''}</b></div>`;}).join('')||'<p class="muted">Sem colaboradores no filtro.</p>'}</div><div class="lgd"><span><i style="background:#79D988"></i>equilibrado</span><span><i style="background:#FFB987"></i>atenção</span><span><i style="background:#ef4444"></i>fora da faixa</span><span><i style="background:var(--txt);width:2px"></i>média da área</span></div>`;
+  // cards por área
+  const lc=`<div class="lcards">${scopeAreas.map(a=>{const ps=peopleOf(a.id),pa=act.filter(c=>c.areaId===a.id);const h=sum(ps.map(c=>tot(c.id,'sa'))),f=sum(ps.map(c=>tot(c.id,'fds'))),j=sum(ps.map(c=>tot(c.id,'j3')));const tp=pa.slice().sort((x,y)=>tot(y.id,'sa')-tot(x.id,'sa'))[0];const ok=pa.filter(c=>band(c)==='ok').length;
+    return `<div class="lcard" data-act="hArea" data-v="${a.id}"><span class="bar" style="background:${areaCor(a.id)}"></span><h4>${esc(a.nome)}</h4><div class="lnum">${fmtN(h)} h</div><div class="muted small">${f} plantões${j?` · ${j} dias de J3`:''} · maior carga: ${tp?esc(short(tp.nome)):'—'}</div><div class="mets"><div><b>${pa.length}</b>pessoas</div><div><b>${pa.length?fmtN(h/pa.length):0} h</b>por pessoa</div><div><b>${pa.length?Math.round(ok/pa.length*100):0}%</b>equilíbrio</div></div></div>`;}).join('')}</div>`;
+  return pageHead('Histórico','Histórico','Planta Interna SP · plantões, sobreaviso e equilíbrio do rodízio · dados da escala desde jan/2025 e aba METODO (2024)',`<button class="btn" data-act="copyHist">⇩ Copiar para Excel</button>`)+
+  escRow+chips+crumb+meta+
+  `<div class="esc-titulo">Resultado consolidado <b>${esc(scopeName)} — ${ui.hArea?'Área':'Consolidado'}${esc(supName)}</b></div>`+
+  hub([hubIt('clock','Horas de sobreaviso',fmtN(H)+' h',`média de ${fmtN(months.length?H/months.length:0)} h/mês · ${act.length?fmtN(H/act.length):0} h por pessoa`,{act:'hm',data:'data-v="sa"'}),
+       hubIt('shield','Plantão J3',J+' dias',J?`${Math.round(J/2)} fins de semana de J3`:'sem J3 no período/escopo',{act:'hm',data:'data-v="j3"'}),
+       hubIt('doc','Plantões',F,`fins de semana e feriados · média ${act.length?fmtN(F/act.length):0} por pessoa`,{act:'hm',data:'data-v="fds"'})],
+      {segs:[{v:bc.ok,c:'#79D988',t:'Equilibrado'},{v:bc.at,c:'#FFB987',t:'Atenção'},{v:bc.er,c:'#ef4444',t:'Fora da faixa'}],k:'Equilíbrio do rodízio',v:eqp+'%',s:`${bc.ok} de ${act.length} colaboradores na faixa de ±20% da média da área (${mlab[0].toLowerCase()})`,pill:eqPill},
+      [hubIt('bolt','Acionamentos',ac,'dias de sobreaviso com acionamento (HE) registrados',{cls:ac?'at':''}),
+       hubIt('trend','Maior carga',top?esc(short(top.nome)):'—',top?`${fmtN(tot(top.id,'sa'))} h${topDev!=null?` · ${pct(topDev)} vs média da área`:''}`:''),
+       hubIt('flag','Mês atual',fmtN(curH)+' h',avgM?`${ymShort(cur)} · média mensal ${fmtN(avgM)} h (${pct((curH-avgM)/avgM)})`:ymShort(cur),{cls:avgM&&curH>avgM*1.2?'er':''}),
+       hubIt('beach','Férias no período',fd+' dias',`${fp.size} colaboradores com férias`)])+
+  secdiv(1,'Evolução no período',`${mlab[0]} por mês${scopeAreas.length>1?', por área':''} · clique numa barra para abrir a escala do mês`)+
+  `<div class="card"><h3>${mlab[0]} por mês · ${esc(scopeName)}</h3>${chart}${lgd}</div>`+
+  secdiv(2,'Quem puxa o resultado',`${mlab[0]} por colaborador no período, comparado à média da própria área`)+
+  `<div class="card"><h3>Distribuição por colaborador · ${pLabel}</h3>${rank}</div>`+
+  secdiv(3,'Gestão por área','clique numa área para filtrar o painel')+lc+
+  secdiv(4,'Detalhamento mês a mês','tabela completa, igual à aba METODO')+histTable(months,metric,scopeAreas,inSup);
+}
+function histTable(months,metric,aList,inSup){
+  const cur=todayS().slice(0,7);const lab=HM[metric][0];
+  const val=(cid,m)=>{const s=monthStat(cid,m);if(!s)return null;return metric==='fds'?s.fds:s[metric];};
+  const last3=[0,1,2].map(i=>ymAdd(cur,-i)),yr=months.filter(m=>m.startsWith(cur.slice(0,4))&&m<=cur);let body='',mx=1;
+  const rowsBy=aList.map(a=>({a,cs:state.colaboradores.filter(c=>c.areaId===a.id&&inSup(c)&&(c.ativo!==false||months.some(m=>val(c.id,m)))).sort((x,y)=>cmp(x.ativo===false?1:0,y.ativo===false?1:0)||cmp(x.nome,y.nome))}));
+  rowsBy.forEach(({cs})=>cs.forEach(c=>months.forEach(m=>{const v=val(c.id,m);if(v>mx)mx=v;})));
+  rowsBy.forEach(({a,cs})=>{if(!cs.length)return;body+=`<tr class="grp"><td class="nm">${esc(a.nome)}</td><td colspan="${months.length+5}"></td></tr>`;
+    cs.forEach(c=>{const ln=lastNext(c.id);const vals=months.map(m=>val(c.id,m));const s3=sum(last3.map(m=>val(c.id,m)||0)),sy=sum(yr.map(m=>val(c.id,m)||0));
+      body+=`<tr style="${c.ativo===false?'opacity:.55':''}"><td class="nm"><b>${esc(c.nome)}</b>${c.ativo===false?' <small>inativo</small>':''}</td>${vals.map((v,i)=>{const src=monthStat(c.id,months[i])?.src;const al=v?Math.min(.9,.15+v/mx*.75):0;return `<td style="${v?`background:rgba(${metric==='j3'?'192,161,255':'255,217,25'},${al.toFixed(2)});color:#2E2D39;font-weight:${al>.5?700:500}`:''}" title="${ymLabel(months[i])}${src==='agg'?' · aba METODO':''}">${v||''}${src==='agg'&&v?'*':''}</td>`;}).join('')}
+      <td class="tot">${s3||''}</td><td class="tot">${sy||''}</td><td class="small">${ln.lJ?fmtS(ln.lJ)+'/'+ln.lJ.slice(2,4):'—'}</td><td class="small">${ln.lS?fmtS(ln.lS)+'/'+ln.lS.slice(2,4):'—'}</td><td class="small">${[ln.nJ&&'J3 '+fmtS(ln.nJ),ln.nS&&'SA '+fmtS(ln.nS)].filter(Boolean).join(' · ')||'—'}</td></tr>`;});});
+  return `<div class="gridwrap" data-keep="hist"><table class="g hist"><thead><tr><th class="nm">${lab}</th>${months.map(m=>`<th style="min-width:46px">${ymShort(m)}</th>`).join('')}<th>Últ. 3<br>meses</th><th>Ano<br>${cur.slice(0,4)}</th><th>Último<br>J3</th><th>Último<br>SA</th><th style="min-width:110px">Próximo</th></tr></thead><tbody>${body}</tbody></table></div><p class="hint">* valor vindo da aba METODO_ESCALA_TX_CAPITAL (meses sem escala detalhada).</p>`;
+}
+
 function render(){
   const keep=[...document.querySelectorAll('[data-keep]')].map(e=>[e.dataset.keep,e.scrollLeft,e.scrollTop]);const wy=window.scrollY;
   if(ui.areaId&&!area(ui.areaId))ui.areaId='';
   buildIdx();
-  const tabs=[['geral','Visão geral'],['escala','Escala'],['historico','Histórico'],['ferias','Férias'],['cadastros','Cadastros'],['config','Configurações']];
+  if(!tabOk(ui.tab))ui.tab='geral';
   const views={geral:rGeral,escala:rEscala,historico:rHist,ferias:rFerias,cadastros:rCad,config:rConfig};
-  $('#root').innerHTML=`<header><div class="brand"><div class="logo-img" role="img" aria-label="V.tal"></div><span class="sep"></span><div class="tt"><b>GESTÃO EQUIPE</b><span>PLANTA INTERNA SP</span></div></div><nav>${tabs.map(([k,l])=>`<button class="${ui.tab===k?'on':''}" data-act="tab" data-v="${k}">${l}</button>`).join('')}</nav><div class="save" id="savest">${saveStatusHtml()}</div><div class="usr"><span title="${esc(PROFILE?.email||'')}">${esc(PROFILE?.nome||PROFILE?.email||'')}</span><span class="badge b-sa">${ROLE_LABEL[ROLE()]}</span><button class="btn sm" data-act="logout">Sair</button></div></header><main>${(views[ui.tab]||rGeral)()}</main><div class="ftr"><span>Gestão Equipe · Planta Interna SP</span><span>Dados no banco · sincronizado ${state.savedAt?new Date(state.savedAt).toLocaleString('pt-BR'):''}</span></div>`;
+  $('#root').innerHTML=`<header class="site"><div class="brand"><div class="logo-img" role="img" aria-label="V.tal"></div><span class="bsep"></span><span class="btit"><b>Gestão Equipe</b><small>Planta Interna SP</small></span></div><nav class="nav">${tabsFor().map(([k,l])=>`<a class="${ui.tab===k?'on':''}" data-act="tab" data-v="${k}" title="${l}">${IC[k]}<span class="lbl">${l}</span></a>`).join('')}</nav><div class="hright"><div class="save" id="savest">${saveStatusHtml()}</div>${temaHtml()}<div class="usr"><b title="${esc(PROFILE?.email||'')}">${esc(PROFILE?.nome||PROFILE?.email||'')}</b><span class="badge b-sa">${ROLE_LABEL[ROLE()]}</span><button class="btn sm gh" data-act="logout">Sair</button></div></div></header><main>${(views[ui.tab]||rGeral)()}</div></main><div class="ftr"><span>Gestão Equipe · Planta Interna SP · V.tal</span><span>Dados no banco · sincronizado ${state.savedAt?new Date(state.savedAt).toLocaleString('pt-BR'):''}</span></div>`;
   keep.forEach(([k,l,t])=>{const e=document.querySelector(`[data-keep="${k}"]`);if(e){e.scrollLeft=l;e.scrollTop=t;}});window.scrollTo(0,wy);
 }
 
 /* ---------- Visão geral ---------- */
 function nextBlockKey(){let s=todayS();if(dow(s)===0)s=add(s,-1);while(dow(s)!==6)s=add(s,1);return s;}
 function blockPeople(aid,b){const res={J3:[],SA:[]};colabsOfArea(aid,b.key.slice(0,7)).forEach(c=>{const r=inBlock(c.id,b);if(r.J3)res.J3.push(c);if(r.SA)res.SA.push({c,h:r.h,days:b.dias.filter(d=>isNum(getV(c.id,d)))});});return res;}
-function rGeral(){
-  const ym=todayS().slice(0,7);
-  let alerts=[];areasSorted().forEach(a=>escalaAlerts(ym,a.id).forEach(x=>{if(x.lvl!=='info')alerts.push({...x,msg:`[${a.nome}] ${x.msg}`});}));
-  const conf=conflictData(todayS(),add(todayS(),365)).list;const venc=feriasAVencer();const semAdm=activeColabs().filter(c=>!c.admissao).length;
-  const nb=makeBlock(nextBlockKey());
-  const rows=areasSorted().map(a=>{const p=blockPeople(a.id,nb);const nm=c=>`<div><b>${esc(short(c.nome))}</b> <span class="muted small">${esc(c.telefone||'')}</span></div>`;
-    return `<tr><td class="small"><b>${esc(a.nome)}</b></td><td>${p.J3.map(nm).join('')||(a.j3Vagas?'<span class="badge b-er">vago</span>':'<span class="muted small">—</span>')}</td><td>${p.SA.map(x=>`<div><b>${esc(short(x.c.nome))}</b> <span class="badge b-sa">${x.days.map(d=>DS1[dow(d)]+' '+getV(x.c.id,d)+'h').join(' · ')}</span> <span class="muted small">${esc(x.c.telefone||'')}</span></div>`).join('')||'<span class="badge b-er">vago</span>'}</td></tr>`;}).join('');
-  const hrs=sum(activeColabs().map(c=>monthStat(c.id,ym)?.sa||0)),j3d=sum(activeColabs().map(c=>monthStat(c.id,ym)?.j3||0));
-  const emFerias=activeColabs().filter(c=>onVac(c.id,todayS()));
-  return `<h2>Visão geral</h2><p class="sub">${DSEM[dow(todayS())]}, ${fmt(todayS())} · ${ymLabel(ym).toLowerCase()}</p>
-  <div class="kpis"><div class="kpi"><span>Colaboradores ativos</span><b>${activeColabs().length}</b></div>
-  <div class="kpi"><span>Horas de sobreaviso no mês</span><b>${hrs.toLocaleString('pt-BR')}h</b></div>
-  <div class="kpi"><span>Dias de J3 no mês</span><b>${j3d}</b></div>
-  <div class="kpi ${alerts.some(a=>a.lvl==='err')?'r':alerts.length?'a':''}"><span>Alertas da escala</span><b>${alerts.length}</b></div>
-  <div class="kpi ${conf.length?'r':''}"><span>Conflitos de férias (12 meses)</span><b>${conf.length}</b></div>
-  <div class="kpi"><span>De férias hoje</span><b>${emFerias.length}</b></div></div>
-  <div class="card"><h3>Plantonistas do próximo fim de semana · ${diasLabel(nb.dias)}${nb.dias.some(isHol)?' <span class="badge b-wa">feriado emendado</span>':''} <button class="btn sm" style="float:right" data-act="copyWk" data-k="${nb.key}">Copiar mensagem</button></h3><div class="tw"><table class="t"><thead><tr><th>Área</th><th>J3 (08h–17h)</th><th>Sobreaviso</th></tr></thead><tbody>${rows}</tbody></table></div></div>
-  <div class="cols">
-   <div class="card"><h3>Alertas da escala · ${ymLabel(ym)}</h3>${alerts.length?alertHtml(alerts.slice(0,12))+(alerts.length>12?`<p class="hint">+${alerts.length-12} alertas na aba Escala</p>`:''):'<div class="alert ok">✅ Escala dentro das regras.</div>'}<button class="btn sm" data-act="tab" data-v="escala">Abrir escala</button></div>
-   <div class="card"><h3>Conflitos de férias</h3>${conf.length?`<div class="tw"><table class="t"><thead><tr><th>Período</th><th>Grupo</th><th>Quem</th></tr></thead><tbody>${conf.map(x=>`<tr><td><span class="badge b-er">${fmtS(x.de)}${x.ate!==x.de?' – '+fmtS(x.ate):''}/${x.de.slice(2,4)}</span></td><td class="small">${esc(x.grupo)}</td><td class="small">${esc(x.nomes)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="alert ok">✅ Nenhuma sobreposição nos próximos 12 meses.</div>'}<button class="btn sm" data-act="tab" data-v="ferias">Abrir férias</button></div>
-   <div class="card"><h3>Férias a vencer</h3>${semAdm?`<div class="alert info">ℹ️ <span>${semAdm} colaboradores sem data exata de admissão são controlados por ciclo anual (saldo do ano). Informe a admissão em Cadastros para entrar nesta lista com o prazo legal.</span></div>`:''}${venc.length?`<div class="tw"><table class="t"><thead><tr><th>Colaborador</th><th>Saldo</th><th>Iniciar até</th><th></th></tr></thead><tbody>${venc.map(v=>`<tr><td><b>${esc(v.c.nome)}</b></td><td><span class="badge ${v.p.status==='vencido'?'b-er':'b-wa'}">${v.p.saldo} d</span></td><td class="small">${fmt(v.limite)}</td><td><button class="btn sm" data-act="newFer" data-c="${v.c.id}">Lançar</button></td></tr>`).join('')}</tbody></table></div>`:(semAdm<activeColabs().length?'<div class="alert ok">✅ Nenhum saldo vencendo nos próximos 150 dias.</div>':'')}</div>
-  </div>`;
-}
-
 /* ---------- Escala ---------- */
 function rEscala(){
   if(!state.areas.length)return `<div class="card empty">Cadastre uma área em <b>Cadastros → Áreas</b>.</div>`;
@@ -408,13 +549,13 @@ function rEscala(){
       body+=`<tr style="${c.ativo===false?'opacity:.55':''}"><td class="nm" title="${esc(c.nome)} · ${esc(c.matricula)}"><b>${esc(c.nome)}</b><small>${esc(c.matricula||'')} · ${esc(c.entrada||'')}–${esc(c.saida||'')} · ${esc(c.telefone||'')}</small></td>${tds}<td class="tot">${j||''}</td><td class="tot">${h?h+'h':''}</td><td class="tot">${wk.size||''}</td></tr>`;});
   });
   const wbl=blocksAll(ym);
-  const wk=wbl.map(b=>{const lines=aList.map(a=>{const p=blockPeople(a.id,b);if(!p.J3.length&&!p.SA.length)return '';return `<div class="row"><span class="small muted" style="min-width:90px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.nome)}">${esc(a.nome.split(' - ')[0])}</span><div>${p.J3.map(c=>`<span class="badge b-j3">J3</span> ${esc(short(c.nome))}`).join('<br>')}${p.J3.length&&p.SA.length?'<br>':''}${p.SA.map(x=>`<span class="badge b-sa">${x.h}h</span> ${esc(short(x.c.nome))}`).join('<br>')}</div></div>`;}).join('');
+  const wk=wbl.map(b=>{const lines=aList.map(a=>{const p=blockPeople(a.id,b);if(!p.J3.length&&!p.SA.length)return '';return `<div class="row"><span class="small muted" style="min-width:90px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.nome)}">${esc(areaShort(a.nome))}</span><div>${p.J3.map(c=>`<span class="badge b-j3">J3</span> ${esc(short(c.nome))}`).join('<br>')}${p.J3.length&&p.SA.length?'<br>':''}${p.SA.map(x=>`<span class="badge b-sa">${x.h}h</span> ${esc(short(x.c.nome))}`).join('<br>')}</div></div>`;}).join('');
     return `<div class="wkc"><h4><span>${diasLabel(b.dias)}${b.dias.some(isHol)?' <span class="badge b-wa">feriado</span>':''}</span><button class="btn sm" data-act="copyWk" data-k="${b.key}">Copiar</button></h4>${lines||'<span class="muted small">Sem plantonistas lançados</span>'}</div>`;}).join('');
-  return `<h2>Escala de plantão</h2><p class="sub">Mesmo formato da planilha: números são horas de sobreaviso no dia. Clique em qualquer célula para lançar, trocar ou marcar acionamento.</p>
+  return pageHead('Escala de plantão','Escala','Mesmo formato da planilha: número na célula = horas de sobreaviso no dia. Clique numa célula para lançar, trocar ou marcar acionamento.')+`
   <div class="bar"><div class="mnav"><button class="btn" data-act="ym" data-v="-1">‹</button><b>${ymLabel(ym)}</b><button class="btn" data-act="ym" data-v="1">›</button></div>
   <select data-ui="areaId"><option value="">Todas as áreas</option>${areasSorted().map(x=>`<option value="${x.id}" ${x.id===ui.areaId?'selected':''}>${esc(x.nome)}</option>`).join('')}</select><span class="sp"></span>
-  <button class="btn needs-edit" data-act="newSN">+ Sobreaviso em vários dias</button><button class="btn" data-act="copyTsv">Copiar para Excel</button><button class="btn pri needs-edit" data-act="gen">⚙ Gerar escala ${ui.areaId?'da área':'de todas as áreas'}</button></div>
-  ${alerts.length?`<div class="card" style="padding:12px 14px"><h3 style="margin-bottom:8px">Alertas (${alerts.filter(a=>a.lvl==='err').length} críticos · ${alerts.filter(a=>a.lvl==='warn').length} atenção · ${alerts.filter(a=>a.lvl==='info').length} info)</h3>${alertHtml(shown)}${alerts.length>6?`<button class="btn sm" data-act="allAl">${ui.allAl?'Mostrar menos':`Ver todos os ${alerts.length}`}</button>`:''}</div>`:'<div class="alert ok">✅ Escala dentro das regras.</div>'}
+  <button class="btn needs-edit" data-act="newSN">+ Sobreaviso em vários dias</button><button class="btn" data-act="copyTsv">Copiar para Excel</button><button class="btn dan needs-edit" data-act="limpar" title="Remove sobreavisos, J3 e folgas de plantão do mês (mantém férias, BH, FA e atestados)">✕ Limpar escala</button><button class="btn pri needs-edit" data-act="gen">⚙ Gerar escala ${ui.areaId?'da área':'de todas as áreas'}</button></div>
+  ${alerts.length?`<div class="card"><h3>Alertas (${alerts.filter(a=>a.lvl==='err').length} críticos · ${alerts.filter(a=>a.lvl==='warn').length} atenção · ${alerts.filter(a=>a.lvl==='info').length} info)</h3>${alertHtml(shown)}${alerts.length>6?`<button class="btn sm" data-act="allAl">${ui.allAl?'Mostrar menos':`Ver todos os ${alerts.length}`}</button>`:''}</div>`:'<div class="alert ok">✅ Escala dentro das regras.</div>'}
   <div class="legend"><span><i class="tag t-SA">24</i>Horas de sobreaviso (⚡ acionado)</span><span><i class="tag t-J3">J3</i>Plantão 08h–17h</span><span><i class="tag t-F">FO</i>Folga</span><span><i class="tag t-FE">FE</i>Férias</span><span><i class="tag t-BH">BH</i>Banco de horas</span><span><i class="tag t-FA">FA</i>Folga abonada</span><span><i class="tag t-AT">AT</i>Atestado</span><span><i class="tag t-X">M</i>Outros</span></div>
   <div class="gridwrap" data-keep="grid"><table class="g"><thead><tr><th class="nm" rowspan="2">Colaborador</th>${head1}<th rowspan="2">J3<br>dias</th><th rowspan="2">Horas<br>SA</th><th rowspan="2">Plan-<br>tões</th></tr><tr>${head2}</tr></thead><tbody>${body}<tr class="foot"><td class="nm"><b>Total de horas</b></td><td colspan="${days.length+1}"></td><td class="tot">${tot.toLocaleString('pt-BR')}h</td><td></td></tr></tbody></table></div>
   <div class="card" style="margin-top:16px"><h3>Plantonistas por fim de semana e feriado</h3><div class="wk">${wk}</div></div>`;
@@ -486,28 +627,6 @@ function escalaTsv(){const ym=ui.ym,days=monthDays(ym);const aList=ui.areaId?[ar
   return L.join('\n');}
 
 /* ---------- Histórico ---------- */
-function rHist(){
-  const cur=todayS().slice(0,7);const maxYm=Object.keys(state.escala).sort().pop()||cur;const end=maxYm>cur?(maxYm>ymAdd(cur,2)?ymAdd(cur,2):maxYm):cur;
-  const allMonths=[...new Set([...Object.keys(state.escala),...Object.values(state.histAgg).flatMap(o=>Object.keys(o))])].sort();
-  const n=ui.hn==='all'?Math.max(1,ddiff(allMonths[0]+'-01',end+'-01')/30.4+1|0):+ui.hn;
-  const months=Array.from({length:n},(_,i)=>ymAdd(end,i-n+1));
-  const metric=ui.hm,lab={sa:'Horas de sobreaviso',j3:'Dias de J3 (plantão físico)',fds:'Plantões (fins de semana/feriados)'}[metric];
-  const val=(cid,m)=>{const s=monthStat(cid,m);if(!s)return null;return metric==='fds'?s.fds:s[metric];};
-  const last3=[0,1,2].map(i=>ymAdd(cur,-i)),yr=months.filter(m=>m.startsWith(cur.slice(0,4))&&m<=cur);
-  const aList=ui.hArea?[area(ui.hArea)]:areasSorted();let body='';let mx=1;
-  const rowsBy=aList.map(a=>({a,cs:state.colaboradores.filter(c=>c.areaId===a.id&&(c.ativo!==false||months.some(m=>val(c.id,m)))).sort((x,y)=>cmp(x.ativo===false?1:0,y.ativo===false?1:0)||cmp(x.nome,y.nome))}));
-  rowsBy.forEach(({cs})=>cs.forEach(c=>months.forEach(m=>{const v=val(c.id,m);if(v>mx)mx=v;})));
-  rowsBy.forEach(({a,cs})=>{if(!cs.length)return;body+=`<tr class="grp"><td class="nm">${esc(a.nome)}</td><td colspan="${months.length+5}"></td></tr>`;
-    cs.forEach(c=>{const ln=lastNext(c.id);const vals=months.map(m=>val(c.id,m));const s3=sum(last3.map(m=>val(c.id,m)||0)),sy=sum(yr.map(m=>val(c.id,m)||0));
-      body+=`<tr style="${c.ativo===false?'opacity:.55':''}"><td class="nm"><b>${esc(c.nome)}</b>${c.ativo===false?' <small>inativo</small>':''}</td>${vals.map((v,i)=>{const src=monthStat(c.id,months[i])?.src;const al=v?Math.min(.85,.12+v/mx*.73):0;return `<td style="${v?`background:rgba(${metric==='j3'?'173,150,220':'241,255,0'},${al.toFixed(2)});color:#212322;font-weight:${al>.5?700:400}`:''}" title="${ymLabel(months[i])}${src==='agg'?' · aba METODO':''}">${v||''}${src==='agg'&&v?'*':''}</td>`;}).join('')}
-      <td class="tot">${s3||''}</td><td class="tot">${sy||''}</td><td class="small">${ln.lJ?fmtS(ln.lJ)+'/'+ln.lJ.slice(2,4):'—'}</td><td class="small">${ln.lS?fmtS(ln.lS)+'/'+ln.lS.slice(2,4):'—'}</td><td class="small">${[ln.nJ&&'J3 '+fmtS(ln.nJ),ln.nS&&'SA '+fmtS(ln.nS)].filter(Boolean).join(' · ')||'—'}</td></tr>`;});});
-  return `<h2>Histórico</h2><p class="sub">Consolidado mês a mês a partir da escala (e da aba METODO para 2024). O gerador usa este histórico para decidir quem é o próximo.</p>
-  <div class="bar"><select data-ui="hm"><option value="sa" ${metric==='sa'?'selected':''}>Horas de sobreaviso</option><option value="j3" ${metric==='j3'?'selected':''}>Dias de J3</option><option value="fds" ${metric==='fds'?'selected':''}>Plantões (fins de semana)</option></select>
-  <select data-ui="hArea"><option value="">Todas as áreas</option>${areasSorted().map(a=>`<option value="${a.id}" ${ui.hArea===a.id?'selected':''}>${esc(a.nome)}</option>`).join('')}</select>
-  <select data-ui="hn"><option value="6" ${ui.hn==='6'?'selected':''}>6 meses</option><option value="12" ${ui.hn==='12'?'selected':''}>12 meses</option><option value="24" ${ui.hn==='24'?'selected':''}>24 meses</option><option value="all" ${ui.hn==='all'?'selected':''}>Tudo</option></select><span class="sp"></span><button class="btn" data-act="copyHist">Copiar para Excel</button></div>
-  <div class="gridwrap" data-keep="hist"><table class="g hist"><thead><tr><th class="nm">${lab}</th>${months.map(m=>`<th style="min-width:46px">${ymShort(m)}</th>`).join('')}<th>Últ. 3<br>meses</th><th>Ano<br>${cur.slice(0,4)}</th><th>Último<br>J3</th><th>Último<br>SA</th><th style="min-width:110px">Próximo</th></tr></thead><tbody>${body}</tbody></table></div>
-  <p class="hint">* valor vindo da aba METODO_ESCALA_TX_CAPITAL (meses sem escala detalhada).</p>`;
-}
 function histTsv(){const cur=todayS().slice(0,7);const months=Array.from({length:12},(_,i)=>ymAdd(cur,i-11));const m=ui.hm;const L=[['Colaborador','Área',...months.map(ymShort)].join('\t')];
   areasSorted().filter(a=>!ui.hArea||a.id===ui.hArea).forEach(a=>state.colaboradores.filter(c=>c.areaId===a.id).forEach(c=>{const v=months.map(x=>{const s=monthStat(c.id,x);return s?(m==='fds'?s.fds:s[m])||'':'';});if(v.some(Boolean)||c.ativo!==false)L.push([c.nome,a.nome,...v].join('\t'));}));return L.join('\n');}
 
@@ -532,7 +651,7 @@ function rFerias(){
       segs.map(ss=>ss.map((s,j)=>{const hasV=s.some(d=>vs.has(d)),hasC=s.some(d=>cs.has(d));const tip=hasV?vacTip(c,s,hasC):'';
         return `<td class="fc ${j===ss.length-1?'me':''}" data-act="ferCell" data-c="${c.id}" data-d="${s[0]}" ${tip?`title="${esc(tip)}"`:''}><div class="seg">${s.map(d=>`<i class="${cs.has(d)?'c':vs.has(d)?'v':isHol(d)?'h':isWE(d)?'w':''}${d===today?' t':''}"></i>`).join('')}</div></td>`;}).join('')).join('')+`</tr>`;});});
   const list=cd.list,launches=state.ferias.filter(f=>{const d=f.inicio||f.periodo;return d>=from&&d<=to;}).sort((a,b)=>cmp(a.inicio||a.periodo,b.inicio||b.periodo));
-  return `<h2>Painel de férias</h2><p class="sub">Visão gerencial por semana. Técnicos da mesma supervisão de férias ao mesmo tempo, ou supervisores e gerente juntos, aparecem em vermelho. Clique numa linha ou semana para lançar.</p>
+  return pageHead('Painel de férias','Férias','Visão gerencial por semana. Técnicos da mesma supervisão de férias ao mesmo tempo, ou supervisores e gerente juntos, aparecem em vermelho. Clique numa linha ou semana para lançar.')+`
   <div class="bar"><select data-ui="fview"><option value="12m" ${roll?'selected':''}>Próximos 12 meses</option><option value="ano" ${roll?'':'selected'}>Ano civil</option></select>${roll?'':`<div class="mnav"><button class="btn" data-act="fy" data-v="-1">‹</button><b style="min-width:60px">${y}</b><button class="btn" data-act="fy" data-v="1">›</button></div>`}
   <select data-ui="fArea"><option value="">Todas as áreas</option>${areasSorted().map(a=>`<option value="${a.id}" ${ui.fArea===a.id?'selected':''}>${esc(a.nome)}</option>`).join('')}</select>
   ${state.supervisoes.length?`<select data-ui="fSup"><option value="">Todas as supervisões</option><option value="lid" ${ui.fSup==='lid'?'selected':''}>Liderança</option>${state.supervisoes.map(s=>`<option value="${s.id}" ${ui.fSup===s.id?'selected':''}>${esc(s.nome)}</option>`).join('')}</select>`:''}
@@ -593,7 +712,7 @@ function rCad(){
   if(ui.sub==='area')html=`<div class="bar"><span class="sp"></span><button class="btn pri needs-admin" data-act="newArea">+ Nova área</button></div><div class="card" style="padding:0"><div class="tw"><table class="t"><thead><tr><th>Área</th><th>J3 / fds</th><th>Sobreaviso</th><th>Sáb / Dom / Feriado</th><th>Noites de semana</th><th>Folgas automáticas</th><th>Ativos</th><th></th></tr></thead><tbody>${areasSorted().map(a=>`<tr><td><b>${esc(a.nome)}</b></td><td>${a.j3Vagas||'—'}</td><td>${a.saVagas} ${a.saModo==='dia'?'por dia':'por fds'}</td><td>${a.hSab}h / ${a.hDom}h / ${a.hFer}h</td><td class="small">${a.noturnoH?`${a.noturnoH}h ${a.noturnoIni}–${addH(a.noturnoIni,a.noturnoH)} · ${NOTMODO[a.noturnoModo]}`:'—'}</td><td class="small">${[a.j3Vagas&&a.folgaJ3?'J3: antes e depois':'',a.folgaSA?'SA: antes':''].filter(Boolean).join(' · ')||'—'}</td><td>${activeColabs().filter(c=>c.areaId===a.id).length}</td><td style="white-space:nowrap"><button class="btn sm needs-admin" data-act="editArea" data-id="${a.id}">Editar</button> <button class="btn sm dan needs-admin" data-act="delArea" data-id="${a.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div><p class="hint">Padrões inferidos dos últimos meses da planilha. Ajuste aqui se algo mudou — o gerador segue estas regras.</p>`;
   if(ui.sub==='sup')html=`<div class="alert info">ℹ️ <span>Os conflitos de férias dos técnicos são verificados dentro de cada supervisão, até o limite de férias simultâneas definido aqui. Supervisores e gerente formam o grupo Liderança.</span></div><div class="bar"><span class="sp"></span><button class="btn pri needs-admin" data-act="newSup">+ Nova supervisão</button></div><div class="card" style="padding:0"><div class="tw"><table class="t"><thead><tr><th>Supervisão</th><th>Área</th><th>Responsável</th><th>Férias simultâneas</th><th>Técnicos</th><th></th></tr></thead><tbody>${state.supervisoes.map(s=>`<tr><td><b>${esc(s.nome)}</b></td><td>${esc(area(s.areaId)?.nome||'Várias')}</td><td>${esc(colab(s.responsavelId)?.nome||'—')}</td><td>${s.feriasMax||1}</td><td>${activeColabs().filter(c=>c.funcao==='tecnico'&&c.supervisaoId===s.id).length}</td><td style="white-space:nowrap"><button class="btn sm needs-admin" data-act="editSup" data-id="${s.id}">Editar</button> <button class="btn sm dan needs-admin" data-act="delSup" data-id="${s.id}">Excluir</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty">Nenhuma supervisão cadastrada.</td></tr>'}</tbody></table></div></div>`;
   if(ui.sub==='usuarios'&&isAdmin())html=usersHtml();
-  return `<h2>Cadastros</h2><p class="sub">Colaboradores, áreas (com o padrão de plantão de cada uma) e supervisões.</p><div class="subtabs">${tabs.map(([k,l])=>`<button class="${ui.sub===k?'on':''}" data-act="sub" data-v="${k}">${l}</button>`).join('')}</div>${html}`;
+  return pageHead('Cadastros','Cadastros','Colaboradores, áreas (com o padrão de plantão de cada uma), supervisões e acessos.')+`<div class="subtabs">${tabs.map(([k,l])=>`<button class="${ui.sub===k?'on':''}" data-act="sub" data-v="${k}">${l}</button>`).join('')}</div>${html}`;
 }
 function openColab(id){
   const e=id?colab(id):null;const t=e?{...e}:{id:'c'+uid(),nome:'',matricula:'',funcao:'tecnico',areaId:areasSorted()[0]?.id||null,supervisaoId:'',telefone:'',entrada:'08:00',saida:'17:00',admissao:'',j3:false,sa:true,ativo:true};
@@ -637,7 +756,7 @@ function openSup(id){
 /* ---------- Configurações ---------- */
 function rConfig(){
   const y=ui.hy;const{list,fac}=nationalHolidays(y);const custom=state.feriados.filter(f=>f.data.startsWith(y+'-')).sort((a,b)=>cmp(a.data,b.data));
-  return `<h2>Configurações</h2><p class="sub">Feriados, backup e regras aplicadas.</p>
+  return pageHead('Configurações','Ajustes','Feriados, regras do gerador, backup e histórico de alterações.')+`
   <div class="cols"><div class="card"><h3>Feriados de ${y}</h3><div class="bar"><div class="mnav"><button class="btn sm" data-act="hy" data-v="-1">‹</button><b style="min-width:60px">${y}</b><button class="btn sm" data-act="hy" data-v="1">›</button></div><label class="chk"><input type="checkbox" data-chg="togFac" ${isAdmin()?'':'disabled'} ${state.config.facultativos?'checked':''}> Considerar Carnaval e Corpus Christi</label></div>
    <div class="tw"><table class="t"><tbody>${list.concat(state.config.facultativos?fac:[]).sort((a,b)=>cmp(a[0],b[0])).map(([d,n])=>`<tr><td style="width:120px">${DSEM[dow(d)]} ${fmtS(d)}</td><td>${esc(n)}</td><td class="muted small">nacional</td><td></td></tr>`).join('')}${custom.map(f=>`<tr><td>${DSEM[dow(f.data)]} ${fmtS(f.data)}</td><td>${esc(f.nome)}</td><td><span class="badge b-fe">local</span></td><td><button class="btn sm dan needs-admin" data-act="delHol" data-v="${f.data}">Remover</button></td></tr>`).join('')}</tbody></table></div>
    <div class="bar needs-admin" style="margin-top:12px"><input type="date" id="h_d"><input id="h_n" placeholder="Nome (ex.: Aniversário de SP)" style="flex:1;min-width:160px"><button class="btn" data-act="addHol">Adicionar feriado local</button></div></div>
@@ -645,7 +764,9 @@ function rConfig(){
    <div class="bar"><button class="btn" data-act="exportJson">Copiar backup (JSON)</button><label class="btn needs-admin" style="flex-direction:row;font-size:14px">Importar arquivo…<input type="file" accept=".json,application/json" data-chg="importFile" style="display:none"></label></div>
    <div class="needs-admin"><textarea id="imp" placeholder="…ou cole aqui o conteúdo do backup" style="width:100%;height:80px;font-family:monospace;font-size:12px"></textarea><div class="bar" style="margin-top:8px"><button class="btn" data-act="importPaste">Importar texto colado</button></div></div></div>
   ${ROLE()!=='leitura'?`<div class="card"><h3>Histórico de alterações</h3><p class="hint" style="margin-top:0">Toda alteração fica registrada no banco com usuário, data e o valor anterior.</p>${AUDIT?auditHtml():'<button class="btn" data-act="loadAudit">Carregar últimas alterações</button>'}</div>`:''}
+  <div class="card"><h3>Regras do gerador</h3><div class="fg"><label>Sem plantão nos dias antes das férias<input type="number" min="0" max="10" data-chg="cfgNum" data-k="semPlantaoAntesFerias" value="${vacBuf().antes}" ${isAdmin()?'':'disabled'}></label><label>Sem plantão nos dias após o retorno<input type="number" min="0" max="10" data-chg="cfgNum" data-k="semPlantaoAposFerias" value="${vacBuf().depois}" ${isAdmin()?'':'disabled'}></label></div><p class="hint">Ex.: com 3 dias, quem sai de férias na segunda não pega o plantão do fim de semana anterior nem a noite de sexta. Se a equipe não tiver outra pessoa disponível, o gerador escala assim mesmo e mostra um alerta.</p></div>
   <div class="card"><h3>Regras aplicadas</h3><ul class="rules small">
+   <li><b>Véspera e retorno de férias</b>: sem plantão nos ${vacBuf().antes} dia(s) antes do início das férias e no(s) ${vacBuf().depois} dia(s) após o retorno, quando houver outra pessoa disponível.</li>
    <li><b>Formato</b>: igual à planilha — número na célula = horas de sobreaviso no dia; J3, FO, BH, FA, AT como siglas. Férias vêm do módulo de férias (FE).</li>
    <li><b>Padrão por área</b>: quantidade de J3 e sobreaviso por fim de semana, horas de sábado/domingo/feriado, noites de semana e folgas automáticas.</li>
    <li><b>Feriado emendado</b> (sexta ou segunda) entra no plantão do fim de semana; feriado isolado no meio da semana vira um plantão próprio.</li>
@@ -657,7 +778,7 @@ function rConfig(){
 
 /* ================= ações ================= */
 const ACT={
-  tab(el){ui.tab=el.dataset.v;try{history.replaceState(null,'','#'+ui.tab);}catch(e){}persistUI();render();window.scrollTo(0,0);},
+  tab(el){if(!tabOk(el.dataset.v))return;ui.tab=el.dataset.v;try{history.replaceState(null,'','#'+ui.tab);}catch(e){}persistUI();render();window.scrollTo(0,0);},
   sub(el){ui.sub=el.dataset.v;persistUI();render();},
   ym(el){ui.ym=ymAdd(ui.ym,+el.dataset.v);persistUI();render();},
   fy(el){ui.year+=+el.dataset.v;persistUI();render();},
@@ -689,6 +810,14 @@ const ACT={
   importPaste(){doImport(val('imp'));}
 };
 Object.assign(ACT,{
+  tema:el=>{setTema(el.dataset.v);render();},
+  hArea:el=>{ui.hArea=el.dataset.v;persistUI();render();},
+  hp:el=>{ui.hp=el.dataset.v;persistUI();render();},
+  hSup:el=>{ui.hSup=el.dataset.v;persistUI();render();},
+  hm:el=>{ui.hm=el.dataset.v;persistUI();render();},
+  goYm:el=>{ui.ym=el.dataset.v;ui.areaId=ui.hArea||'';ui.tab='escala';persistUI();render();window.scrollTo(0,0);},
+  limpar:()=>{const aList=ui.areaId?[area(ui.areaId)]:areasSorted();confirmBox('Limpar a escala?',`Serão removidos os sobreavisos, J3 e folgas de plantão (FO) de <b>${ymLabel(ui.ym)}</b> em <b>${ui.areaId?esc(area(ui.areaId).nome):'todas as áreas'}</b>. Férias, BH, FA, atestados e treinamentos são mantidos. As alterações ficam no histórico de alterações.`,'Limpar escala',()=>{buildIdx();let n=0;aList.forEach(a=>n+=limparMes(ui.ym,a.id));buildIdx();touch();render();toast(`${n} lançamento(s) removidos`);},true);},
+  cfgNum:el=>{const v=Math.max(0,Math.min(10,Math.floor(+el.value||0)));state.config[el.dataset.k]=v;touch();toast('Regra atualizada — vale para as próximas gerações');},
   logout:async()=>{if(dirty)await doSave();await sb.auth.signOut();},
   reload:()=>{if(dirty){toast('Aguarde salvar as alterações');return;}reloadData().then(()=>toast('Dados atualizados'));},
   lmode:el=>renderLogin(el.dataset.v),
@@ -697,7 +826,7 @@ Object.assign(ACT,{
   delUser:el=>{const u=USERS.find(x=>x.id===el.dataset.id);confirmBox('Remover acesso?',`${esc(u.email)} perderá o acesso. A conta de login continua existindo no Supabase, mas sem perfil não consegue ver dados.`,'Remover',async()=>{const{error}=await sb.from('profiles').delete().eq('id',u.id);if(error)return toast(error.message);await loadUsers();},true);}
 });
 ['setRole','setUserSup'].forEach(k=>ACT[k]=async el=>{const id=el.dataset.id,f=k==='setRole'?{role:el.value}:{supervisao_id:el.value||null};const{error}=await sb.from('profiles').update(f).eq('id',id);if(error){toast(error.message);await loadUsers();return;}toast('Acesso atualizado');const u=USERS.find(x=>x.id===id);Object.assign(u,f);if(id===PROFILE.id){Object.assign(PROFILE,f);document.body.className='role-'+PROFILE.role;}render();});
-['newColab','editColab','newArea','editArea','delArea','newSup','editSup','delSup','togFac','addHol','delHol','importFile','importPaste'].forEach(k=>{const f=ACT[k];ACT[k]=(el,e)=>{if(!isAdmin()){if(el&&el.type==='checkbox')el.checked=!el.checked;return deny();}return f(el,e);};});
+['cfgNum','newColab','editColab','newArea','editArea','delArea','newSup','editSup','delSup','togFac','addHol','delHol','importFile','importPaste'].forEach(k=>{const f=ACT[k];ACT[k]=(el,e)=>{if(!isAdmin()){if(el&&el.type==='checkbox')el.checked=!el.checked;return deny();}return f(el,e);};});
 (()=>{const f={cell:ACT.cell,ferCell:ACT.ferCell,editFer:ACT.editFer,delFer:ACT.delFer,newFer:ACT.newFer,newSN:ACT.newSN,gen:ACT.gen};
   ACT.cell=el=>canEditColab(el.dataset.c)?f.cell(el):deny();
   ACT.ferCell=el=>canEditColab(el.dataset.c)?f.ferCell(el):deny();
@@ -705,13 +834,14 @@ Object.assign(ACT,{
   ACT.editFer=el=>{const x=state.ferias.find(z=>z.id===el.dataset.id);return x&&canEditColab(x.colabId)?f.editFer(el):deny();};
   ACT.delFer=el=>{const x=state.ferias.find(z=>z.id===el.dataset.id);return x&&canEditColab(x.colabId)?f.delFer(el):deny();};
   ACT.newSN=el=>canEditAny()?f.newSN(el):deny();
+  ACT.limpar=(()=>{const f=ACT.limpar;return el=>{const aList=ui.areaId?[area(ui.areaId)]:areasSorted();const ok=isAdmin()||(ROLE()==='supervisor'&&aList.every(a=>colabsOfArea(a.id,ui.ym).every(c=>canEditColab(c.id))));return ok?f(el):toast(isAdmin()?'':'Para limpar, escolha uma área onde todos os plantonistas são da sua supervisão (ou peça ao administrador).');};})();
   ACT.gen=el=>{const aList=ui.areaId?[area(ui.areaId)]:areasSorted();const ok=isAdmin()||(ROLE()==='supervisor'&&aList.every(a=>escalaveis(a.id).every(c=>canEditColab(c.id))));return ok?f.gen(el):toast(isAdmin()?'':'Para gerar, escolha uma área onde todos os plantonistas são da sua supervisão (ou peça ao administrador).');};
 })();
 async function loadUsers(){const{data,error}=await sb.from('profiles').select('*').order('created_at');if(error){toast(error.message);return;}USERS=data;render();}
 function usersHtml(){
   if(!USERS){loadUsers();return '<p class="muted">Carregando usuários…</p>';}
-  return `<div class="alert info">ℹ️ <span>Qualquer pessoa com e-mail <b>@vtal.com</b> pode criar conta e entra como <b>Leitura</b>. Aqui você libera <b>Supervisor</b> (edita escala e férias da supervisão vinculada) ou <b>Administrador</b> (edita tudo e gerencia acessos).</span></div>
-  <div class="card" style="padding:0"><div class="tw"><table class="t"><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Supervisão (para perfil Supervisor)</th><th>Desde</th><th></th></tr></thead><tbody>${USERS.map(u=>`<tr><td><b>${esc(u.nome||'')}</b>${u.id===PROFILE.id?' <span class="badge">você</span>':''}</td><td class="small">${esc(u.email)}</td>
+  return `<div class="alert info">ℹ️ <span>Qualquer pessoa com e-mail <b>@vtal.com</b> pode criar conta (nome, e-mail, telefone e senha) e entra como <b>Leitura</b> — vê Visão geral, Escala e Férias. Aqui você libera <b>Supervisor</b> (edita escala e férias da supervisão vinculada) ou <b>Administrador</b> (edita tudo e gerencia acessos).</span></div>
+  <div class="card" style="padding:0"><div class="tw"><table class="t"><thead><tr><th>Usuário</th><th>E-mail</th><th>Telefone</th><th>Perfil</th><th>Supervisão (para perfil Supervisor)</th><th>Desde</th><th></th></tr></thead><tbody>${USERS.map(u=>`<tr><td><b>${esc(u.nome||'')}</b>${u.id===PROFILE.id?' <span class="badge">você</span>':''}</td><td class="small">${esc(u.email)}</td><td class="small" style="white-space:nowrap">${esc(u.telefone||'—')}</td>
     <td><select data-chg="setRole" data-id="${u.id}">${Object.entries(ROLE_LABEL).map(([k,l])=>`<option value="${k}" ${u.role===k?'selected':''}>${l}</option>`).join('')}</select></td>
     <td><select data-chg="setUserSup" data-id="${u.id}" ${u.role==='supervisor'?'':'disabled'}><option value="">—</option>${state.supervisoes.map(s=>`<option value="${s.id}" ${u.supervisao_id===s.id?'selected':''}>${esc(s.nome)}</option>`).join('')}</select></td>
     <td class="small">${fmt((u.created_at||'').slice(0,10))}</td><td>${u.id===PROFILE.id?'':`<button class="btn sm dan" data-act="delUser" data-id="${u.id}">Remover</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -737,19 +867,19 @@ window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(['ge
 let LOGIN={mode:'entrar',msg:'',err:''};
 function renderLogin(mode,msg,err){if(mode)LOGIN.mode=mode;LOGIN.msg=msg||'';LOGIN.err=err||'';
   const f={entrar:`<form id="fLogin"><label>E-mail V.tal<input type="email" id="l_em" required placeholder="nome.sobrenome@vtal.com" autocomplete="username"></label><label>Senha<input type="password" id="l_pw" required autocomplete="current-password"></label><button class="btn pri" type="submit">Entrar</button></form><div class="lk"><a data-act="lmode" data-v="cadastro">Criar conta</a><a data-act="lmode" data-v="esqueci">Esqueci a senha</a></div>`,
-    cadastro:`<form id="fCad"><label>Nome<input id="c_nm" required></label><label>E-mail V.tal<input type="email" id="c_em" required placeholder="nome.sobrenome@vtal.com" autocomplete="username"></label><label>Senha (mín. 8 caracteres)<input type="password" id="c_pw" required minlength="8" autocomplete="new-password"></label><label>Repita a senha<input type="password" id="c_pw2" required minlength="8" autocomplete="new-password"></label><button class="btn pri" type="submit">Criar conta</button><p class="hint">Toda conta nova entra com perfil <b>Leitura</b>. O administrador libera edição quando necessário.</p></form><div class="lk"><a data-act="lmode" data-v="entrar">Já tenho conta</a></div>`,
+    cadastro:`<form id="fCad"><label>Nome<input id="c_nm" required></label><label>E-mail V.tal<input type="email" id="c_em" required placeholder="nome.sobrenome@vtal.com" autocomplete="username"></label><label>Telefone (celular)<input type="tel" id="c_fone" required placeholder="(11) 90000-0000" autocomplete="tel"></label><label>Senha (mín. 8 caracteres)<input type="password" id="c_pw" required minlength="8" autocomplete="new-password"></label><label>Repita a senha<input type="password" id="c_pw2" required minlength="8" autocomplete="new-password"></label><button class="btn pri" type="submit">Criar conta</button><p class="hint">Toda conta nova entra com perfil <b>Leitura</b>. O administrador libera edição quando necessário.</p></form><div class="lk"><a data-act="lmode" data-v="entrar">Já tenho conta</a></div>`,
     esqueci:`<form id="fEsq"><label>E-mail V.tal<input type="email" id="e_em" required></label><button class="btn pri" type="submit">Enviar link para redefinir</button></form><div class="lk"><a data-act="lmode" data-v="entrar">Voltar</a></div>`,
     nova:`<form id="fNova"><label>Nova senha<input type="password" id="n_pw" required minlength="8" autocomplete="new-password"></label><label>Repita a nova senha<input type="password" id="n_pw2" required minlength="8" autocomplete="new-password"></label><button class="btn pri" type="submit">Salvar nova senha</button></form>`}[LOGIN.mode];
   const t={entrar:'Entrar',cadastro:'Criar conta',esqueci:'Redefinir senha',nova:'Nova senha'}[LOGIN.mode];
-  $('#root').innerHTML=`<div class="login"><div class="lbox"><div class="lhead"><div class="logo-img"></div><div class="tt"><b>GESTÃO EQUIPE</b><span>PLANTA INTERNA SP</span></div></div><div class="lbody"><h3>${t}</h3>${LOGIN.err?`<div class="alert err">⛔ ${esc(LOGIN.err)}</div>`:''}${LOGIN.msg?`<div class="alert ok">✅ ${esc(LOGIN.msg)}</div>`:''}${f}</div></div><p class="lfoot">Acesso restrito a colaboradores V.tal</p></div>`;}
+  $('#root').innerHTML=`<div class="login"><div class="lbox"><div class="lhead"><div class="logo-img"></div><span class="bsep" style="width:1px;height:28px;background:var(--line)"></span><span class="btit"><b>Gestão Equipe</b><small>Planta Interna SP</small></span></div><div class="lbody"><h3>${t}</h3>${LOGIN.err?`<div class="alert err">⛔ ${esc(LOGIN.err)}</div>`:''}${LOGIN.msg?`<div class="alert ok">✅ ${esc(LOGIN.msg)}</div>`:''}${f}</div></div><p class="lfoot">Acesso restrito a colaboradores V.tal</p></div>`;}
 const vtal=e=>/^[^@\s]+@vtal\.com$/i.test(String(e).trim());
 const authErr=m=>/Invalid login/i.test(m)?'E-mail ou senha incorretos.':/Email not confirmed/i.test(m)?'Confirme seu e-mail pelo link que enviamos antes de entrar.':/Database error|vtal/i.test(m)?'Cadastro permitido somente com e-mail @vtal.com.':/already registered/i.test(m)?'Este e-mail já tem conta. Use “Esqueci a senha” se precisar.':m;
 document.addEventListener('submit',async e=>{const id=e.target.id;if(!/^f(Login|Cad|Esq|Nova)$/.test(id))return;e.preventDefault();const btn=e.target.querySelector('button[type=submit]');if(btn)btn.disabled=true;
   try{
     if(id==='fLogin'){const em=val('l_em').trim().toLowerCase();if(!vtal(em))return renderLogin(null,'','Use seu e-mail @vtal.com.');const{data,error}=await sb.auth.signInWithPassword({email:em,password:val('l_pw')});if(error)return renderLogin(null,'',authErr(error.message));await afterLogin(data.session);}
-    if(id==='fCad'){const em=val('c_em').trim().toLowerCase();if(!vtal(em))return renderLogin(null,'','Cadastro permitido somente com e-mail @vtal.com.');if(val('c_pw')!==val('c_pw2'))return renderLogin(null,'','As senhas não conferem.');
-      const{data,error}=await sb.auth.signUp({email:em,password:val('c_pw'),options:{data:{nome:val('c_nm').trim()},emailRedirectTo:location.origin+location.pathname}});if(error)return renderLogin(null,'',authErr(error.message));
-      if(data.session)return afterLogin(data.session);renderLogin('entrar','Conta criada! Enviamos um link de confirmação para '+em+'. Depois de confirmar, entre com sua senha.');}
+    if(id==='fCad'){const em=val('c_em').trim().toLowerCase();if(!vtal(em))return renderLogin(null,'','Cadastro permitido somente com e-mail @vtal.com.');if(val('c_pw')!==val('c_pw2'))return renderLogin(null,'','As senhas não conferem.');if(String(val('c_fone')).replace(/\D/g,'').length<10)return renderLogin(null,'','Informe o telefone com DDD.');
+      const{data,error}=await sb.auth.signUp({email:em,password:val('c_pw'),options:{data:{nome:val('c_nm').trim(),telefone:val('c_fone').trim()},emailRedirectTo:location.origin+location.pathname}});if(error)return renderLogin(null,'',authErr(error.message));
+      if(data.session)return afterLogin(data.session);const r2=await sb.auth.signInWithPassword({email:em,password:val('c_pw')});if(r2.data&&r2.data.session)return afterLogin(r2.data.session);renderLogin('entrar','Conta criada! Se o acesso pedir confirmação, use o link enviado para '+em+'. Depois entre com sua senha.');}
     if(id==='fEsq'){const em=val('e_em').trim().toLowerCase();if(!vtal(em))return renderLogin(null,'','Use seu e-mail @vtal.com.');const{error}=await sb.auth.resetPasswordForEmail(em,{redirectTo:location.origin+location.pathname});if(error)return renderLogin(null,'',authErr(error.message));renderLogin('entrar','Se o e-mail tiver conta, você receberá um link para criar uma nova senha.');}
     if(id==='fNova'){if(val('n_pw')!==val('n_pw2'))return renderLogin(null,'','As senhas não conferem.');const{error}=await sb.auth.updateUser({password:val('n_pw')});if(error)return renderLogin(null,'',authErr(error.message));history.replaceState(null,'',location.pathname);const{data}=await sb.auth.getSession();toast('Senha alterada');await afterLogin(data.session);}
   }finally{if(btn)btn.disabled=false;}
