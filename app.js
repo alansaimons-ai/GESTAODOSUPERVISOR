@@ -75,7 +75,7 @@ const addH=(t,h)=>{const m=(tmin(t)+h*60)%1440;return `${pad(Math.floor(m/60))}:
 function colabsOfArea(aid,ym){const has=c=>!!(ym&&state.escala[ym]&&state.escala[ym][c.id]&&Object.keys(state.escala[ym][c.id]).length);return state.colaboradores.filter(c=>c.areaId===aid&&(has(c)||(c.ativo!==false&&(c.sa!==false||c.j3)))).sort((a,b)=>cmp(a.ativo===false?1:0,b.ativo===false?1:0)||cmp(a.nome,b.nome));}
 const escalaveis=aid=>activeColabs().filter(c=>c.areaId===aid&&(c.sa!==false||c.j3));
 
-function buildIdx(){IDX={vac:{}};state.ferias.forEach(f=>{const s=IDX.vac[f.colabId]=IDX.vac[f.colabId]||new Set();vacDays(f).forEach(d=>s.add(d));});SC={};}
+function buildIdx(){IDX={vac:{}};state.ferias.forEach(f=>{const s=IDX.vac[f.colabId]=IDX.vac[f.colabId]||new Set();vacDays(f).forEach(d=>s.add(d));});SC={};ALLOC_V++;}
 
 /* ================= blocos de plantão ================= */
 function makeBlock(sat){let start=sat,end=add(sat,1);while(isHol(add(start,-1)))start=add(start,-1);while(isHol(add(end,1)))end=add(end,1);return{key:sat,start,end,dias:range(start,end),folgaAntes:prevWork(start),folgaDepois:nextWork(end)};}
@@ -204,7 +204,7 @@ function lastNext(cid){const t=todayS();let lJ='',lS='',nJ='',nS='';Object.keys(
 /* ================= férias ================= */
 const vacDays=f=>f.dias>0&&f.inicio?range(f.inicio,add(f.inicio,f.dias-1)):[];
 function basePeriods(c){const today=todayS(),res=[];
-  if(c.admissao){for(let k=0;k<70;k++){const ini=addYears(c.admissao,k);if(ini>today)break;res.push({key:ini,ini,fim:add(addYears(c.admissao,k+1),-1),concFim:add(addYears(c.admissao,k+2),-1)});}}
+  if(c.admissao){const lim=state.ferias.filter(f=>f.colabId===c.id&&f.inicio).reduce((m,f)=>f.inicio>m?f.inicio:m,today);for(let k=0;k<70;k++){const ini=addYears(c.admissao,k);if(ini>lim)break;res.push({key:ini,ini,fim:add(addYears(c.admissao,k+1),-1),concFim:add(addYears(c.admissao,k+2),-1)});}}
   else{const y=+today.slice(0,4);for(let k=y;k<=y+1;k++)res.push({key:`${k}-01-01`,ini:`${k}-01-01`,fim:`${k}-12-31`,concFim:`${k+1}-12-31`});}
   return res;}
 function periodos(c,all){
@@ -218,20 +218,39 @@ function periodos(c,all){
       res.push({key,ciclo:n,ini:null,fim:null,concFim:null,fr:ff,gozo,abono,direito:30,saldo,status,label:`Ciclo ${n}`,uso:ds.length?`gozo ${fmtS(ds[0][0])}/${ds[0][0].slice(2,4)} a ${fmtS(ds[ds.length-1][1])}/${ds[ds.length-1][1].slice(2,4)}`:''});}
     return res.filter(p=>all||p.ciclo>=max);
   }
-  const res=basePeriods(c);const keys=new Set(res.map(p=>p.key));
-  state.ferias.filter(f=>f.colabId===c.id).forEach(f=>{if(keys.has(f.periodo)||!/^\d{4}-\d{2}-\d{2}$/.test(f.periodo||''))return;keys.add(f.periodo);const ini=f.periodo;res.push({key:ini,ini,fim:add(addYears(ini,1),-1),concFim:add(addYears(ini,2),-1)});});
-  res.sort((a,b)=>cmp(a.ini,b.ini));
-  return res.map(p=>{const fr=state.ferias.filter(f=>f.colabId===c.id&&f.periodo===p.key);const gozo=sum(fr.map(f=>f.dias)),abono=sum(fr.map(f=>f.abono||0)),direito=30,saldo=direito-gozo-abono;
+  const al=allocFerias(c);const base=al.ps;
+  const res=base.map(p=>{const fr=state.ferias.filter(f=>f.colabId===c.id&&(al.parts[f.id]||[]).some(x=>x.k===p.key));const pt=fr.flatMap(f=>al.parts[f.id].filter(x=>x.k===p.key).map(x=>({...x,id:f.id})));const gozo=sum(pt.map(x=>x.d)),abono=sum(pt.map(x=>x.a)),direito=30,saldo=direito-gozo-abono;
     const hd=state.config.historicoDesde||'2025-01-01';
-    const status=p.fim>=today?'aquisicao':p.fim<hd?'historico':saldo<=0?'quitado':p.concFim<today?(p.fim>=(state.config.controleDesde||'2026-12-01')?'vencido':'verificar'):'aberto';
-    return{...p,fr,gozo,abono,direito,saldo,status};}).filter(p=>all||p.concFim>=today||(p.fr.length&&p.status!=='historico'));
+    const status=p.fim>=today?'aquisicao':p.fim<hd&&saldo>0?'historico':saldo<=0?'quitado':p.concFim<today?(p.fim>=(state.config.controleDesde||'2026-12-01')?'vencido':'verificar'):'aberto';
+    return{...p,fr,pt,gozo,abono,direito,saldo,status};});
+  // esconde os anos anteriores aos registros (antes da base de dados)
+  const firstUsed=res.findIndex(p=>p.fr.length);const vis=firstUsed<0?res.slice(-3):res.slice(firstUsed);
+  return vis.filter(p=>all||p.concFim>=today||(p.fr.length&&p.status!=='historico'&&p.status!=='quitado'));
 }
+// distribui as férias nos períodos aquisitivos a partir da admissão (30 dias por período, o mais antigo primeiro)
+const ALLOC={};
+function allocFerias(c){const k=c.id+'|'+c.admissao+'|'+state.ferias.length;if(ALLOC[k]&&ALLOC[k].v===ALLOC_V)return ALLOC[k];
+  const ps=basePeriods(c),byKey={},rem={},parts={};ps.forEach(p=>{byKey[p.key]=p;rem[p.key]=30;});const today=todayS();
+  const fr=state.ferias.filter(f=>f.colabId===c.id);const valid=(p,d)=>p.fim<d&&d<=p.concFim;const put=(f,key,d,a)=>{(parts[f.id]=parts[f.id]||[]).push({k:key,d,a});rem[key]-=d+a;};
+  const dated=fr.filter(f=>f.dias>0&&f.inicio).sort((a,b)=>cmp(a.inicio,b.inicio));
+  // primeiro período considerado: o que cobre a primeira férias registrada (anteriores ficam fora — antes da base de dados)
+  let s0=0;if(dated.length){const d0=dated[0].inicio;const i=ps.findIndex(p=>valid(p,d0));s0=i>=0?i:Math.max(0,ps.findIndex(p=>p.ini<=d0&&d0<=p.fim));}
+  // vendas sem data: no período informado (ou no último completo)
+  fr.filter(f=>!(f.dias>0&&f.inicio)).forEach(f=>{const p=byKey[f.periodo]||ps.filter(p=>p.fim<today).pop()||ps[ps.length-1];if(p)put(f,p.key,+f.dias||0,+f.abono||0);});
+  dated.forEach(f=>{const d=f.inicio,ab=+f.abono||0;let left=+f.dias||0;const st=byKey[f.periodo];
+    if(st&&valid(st,d)&&rem[st.key]>=left+ab){put(f,st.key,left,ab);return;}
+    // saldo mais antigo primeiro, dividindo entre períodos quando necessário
+    const sl=ps.slice(s0);const el=[...sl.filter(p=>valid(p,d)),...sl.filter(p=>p.concFim<d),...sl.filter(p=>p.ini<=d&&d<=p.fim)];let a=ab;
+    for(const p of el){if(left<=0)break;const r=rem[p.key];if(r<=0)continue;const t=Math.min(r,left+a);const ta=Math.min(a,t),td=t-ta;put(f,p.key,td,ta);left-=td;a-=ta;}
+    if(left>0||a>0){const p=el[el.length-1]||ps.find(p=>p.ini<=d&&d<=p.fim)||ps[ps.length-1];put(f,p.key,left,a);}});
+  const map={};Object.keys(parts).forEach(id=>{const pp=parts[id].filter(x=>x.d||x.a);map[id]=(pp[0]||parts[id][0]).k;parts[id]=pp.length?pp:parts[id];});
+  return ALLOC[k]={v:ALLOC_V,ps,map,parts};}
+let ALLOC_V=0;
+const perOf=f=>{const c=colab(f.colabId);return c&&c.admissao?(allocFerias(c).map[f.id]||f.periodo):f.periodo;};
+// grava no lançamento o período calculado (corrige períodos antigos ou de antes da admissão ser informada)
+function normalizePeriods(c){if(!c||!c.admissao)return 0;ALLOC_V++;const al=allocFerias(c);let n=0;state.ferias.filter(f=>f.colabId===c.id).forEach(f=>{const k=al.map[f.id];if(k&&f.periodo!==k){f.periodo=k;n++;}});return n;}
 const perLabel=k=>/^ciclo-/.test(k||'')?'Ciclo '+k.slice(6):'Aquisitivo '+fmt(k);
-function reassignPeriods(c){
-  const ps=basePeriods(c);if(!ps.length)return;const rem={};ps.forEach(p=>rem[p.key]=30);
-  state.ferias.filter(f=>f.colabId===c.id).sort((a,b)=>cmp(a.inicio||'9',b.inicio||'9')).forEach(f=>{const need=(+f.dias||0)+(+f.abono||0),d=f.inicio||todayS();
-    let p=ps.find(p=>p.fim<d&&p.concFim>=d&&rem[p.key]>=need)||ps.find(p=>p.fim<d&&rem[p.key]>=need)||ps.filter(p=>p.ini<=d).pop()||ps[0];f.periodo=p.key;rem[p.key]-=need;});
-}
+function reassignPeriods(c){normalizePeriods(c);}
 const STATUS={aquisicao:['Em aquisição','b-fe'],aberto:['Disponível','b-ok'],vencido:['Vencido — confirmar','b-er'],quitado:['Quitado',''],historico:['Histórico (antes dos dados)',''],proximo:['Próximo ciclo','b-fe'],verificar:['Saldo antigo — verificar','b-wa']};
 function saldoInfo(c){const ps=periodos(c).filter(p=>p.status==='aberto'||p.status==='vencido');const s=sum(ps.map(p=>p.saldo));const venc=ps.some(p=>p.status==='vencido');const soon=ps.some(p=>p.saldo>0&&p.concFim<=add(todayS(),90));return{s,venc,soon,est:!c.admissao};}
 function groups(){
@@ -258,9 +277,9 @@ function teamConf(c,days,ignoreId){
   return Object.values(res);
 }
 function validarFerias(c,per,n,ignoreId){
-  const errs=[],warns=[];const outros=per.fr.filter(f=>f.id!==ignoreId);
-  const frs=outros.filter(f=>f.dias>0).map(f=>+f.dias);if(n.dias>0)frs.push(n.dias);
-  const abonoT=sum(outros.map(f=>f.abono||0))+n.abono,gozoT=sum(frs),rem=per.direito-gozoT-abonoT,maxAb=Math.floor(per.direito/3);
+  const errs=[],warns=[];const outros=per.fr.filter(f=>f.id!==ignoreId);const pt=f=>(per.pt||[]).filter(x=>x.id===f.id);const dOf=f=>per.pt?sum(pt(f).map(x=>x.d)):+f.dias||0,aOf=f=>per.pt?sum(pt(f).map(x=>x.a)):+f.abono||0;
+  const frs=outros.filter(f=>dOf(f)>0).map(dOf);if(n.dias>0)frs.push(n.dias);
+  const abonoT=sum(outros.map(aOf))+n.abono,gozoT=sum(frs),rem=per.direito-gozoT-abonoT,maxAb=Math.floor(per.direito/3);
   if(n.dias<0||n.abono<0||!Number.isInteger(n.dias)||!Number.isInteger(n.abono))errs.push('Informe números inteiros e positivos.');
   if(!n.dias&&!n.abono)errs.push('Informe os dias de gozo e/ou os dias vendidos.');
   if(n.dias>0&&!n.inicio)errs.push('Informe a data de início.');
@@ -321,7 +340,7 @@ function rowsOf(){
 function snapshot(){const R=rowsOf(),S={};for(const t in R){S[t]={};for(const k in R[t])S[t][k]=JSON.stringify(R[t][k]);}return S;}
 function persistUI(){try{localStorage.setItem(LSU,JSON.stringify(ui));}catch(e){}}
 function loadUI(){try{return JSON.parse(localStorage.getItem(LSU)||'{}')||{};}catch(e){return{};}}
-function touch(){dirty=true;invalidateHol();setStatus('dirty');clearTimeout(saveTimer);saveTimer=setTimeout(doSave,1200);}
+function touch(){dirty=true;ALLOC_V++;invalidateHol();setStatus('dirty');clearTimeout(saveTimer);saveTimer=setTimeout(doSave,1200);}
 async function doSave(){
   if(!dirty||!sb)return;if(syncing||M){clearTimeout(saveTimer);saveTimer=setTimeout(doSave,1500);return;}
   syncing=true;setStatus('saving');const R=rowsOf();let changed=0;
@@ -666,13 +685,13 @@ function vacTip(c,s,hasC){const fs=state.ferias.filter(f=>f.colabId===c.id&&vacD
 
 function openFerias(cid,preIni,editId){
   const t={cid:cid||'',per:null,inicio:preIni||'',dias:'',abono:0,obs:'',editId:editId||null};
-  if(editId){const f=state.ferias.find(x=>x.id===editId);if(!f)return;Object.assign(t,{cid:f.colabId,per:f.periodo,inicio:f.inicio,dias:f.dias,abono:f.abono||0,obs:f.obs||''});}
+  if(editId){const f=state.ferias.find(x=>x.id===editId);if(!f)return;Object.assign(t,{cid:f.colabId,per:perOf(f),inicio:f.inicio,dias:f.dias,abono:f.abono||0,obs:f.obs||''});}
   const pickPer=()=>{const c=colab(t.cid);if(!c){t.per=null;return;}const ps=periodos(c);if(t.per&&ps.some(p=>p.key===t.per))return;const p=ps.find(p=>(p.status==='vencido'||p.status==='aberto')&&p.saldo>=5)||ps.find(p=>p.status==='aquisicao'||p.status==='proximo')||ps[ps.length-1];t.per=p?p.key:null;};
   pickPer();
   const nums=()=>({inicio:t.inicio,dias:t.dias===''?0:Math.floor(+t.dias),abono:t.abono===''?0:Math.floor(+t.abono)});
-  const preview=()=>{const c=colab(t.cid);if(!c)return '<p class="muted">Selecione um colaborador.</p>';const per=periodos(c).find(p=>p.key===t.per);if(!per)return '<p class="muted">Selecione o período aquisitivo.</p>';
+  const preview=()=>{const c=colab(t.cid);if(!c)return '<p class="muted">Selecione um colaborador.</p>';const per=periodos(c,true).find(p=>p.key===t.per);if(!per)return '<p class="muted">Selecione o período aquisitivo.</p>';
     const n=nums(),v=validarFerias(c,per,n,t.editId);const fim=n.dias>0&&n.inicio?add(n.inicio,n.dias-1):null,ret=fim?nextWork(fim):null;
-    const prevUsed=per.direito-(per.saldo+(t.editId?sum(per.fr.filter(f=>f.id===t.editId).map(f=>(+f.dias||0)+(+f.abono||0))):0));
+    const prevUsed=per.direito-(per.saldo+(t.editId?(per.pt?sum(per.pt.filter(x=>x.id===t.editId).map(x=>x.d+x.a)):sum(per.fr.filter(f=>f.id===t.editId).map(f=>(+f.dias||0)+(+f.abono||0)))):0));
     const pc=x=>Math.max(0,x)/per.direito*100;
     return `<div class="sumbox"><div><span>Gozo</span><b>${fim?`${fmtS(n.inicio)} a ${fmt(fim)}`:'—'}</b></div><div><span>Retorno ao trabalho</span><b>${ret?DSEM[dow(ret)]+', '+fmt(ret):'—'}</b></div><div><span>Gozo + venda</span><b>${n.dias} + ${n.abono} dias</b></div><div class="big ${v.rem<0?'neg':''}"><span>Saldo remanescente</span><b>${v.rem} dia${Math.abs(v.rem)===1?'':'s'}</b></div></div>
     <div class="sbar"><i style="width:${pc(prevUsed)}%;background:#9D9C92"></i><i style="width:${pc(n.dias)}%;background:#AD96DC"></i><i style="width:${pc(n.abono)}%;background:#F1FF00"></i></div>
@@ -683,10 +702,10 @@ function openFerias(cid,preIni,editId){
   openModal({wide:true,render(){
     const opts=groups().map(g=>({...g,members:g.members.filter(c=>canEditColab(c.id))})).filter(g=>g.members.length).map(g=>`<optgroup label="${esc(g.nome)}">${g.members.map(c=>`<option value="${c.id}" ${c.id===t.cid?'selected':''}>${esc(c.nome)} — ${esc(c.matricula||'')}</option>`).join('')}</optgroup>`).join('');
     const c=colab(t.cid);let perHtml='',hist='';
-    if(c){const ps=periodos(c);
-      perHtml=`<h4 style="margin:14px 0 6px;font-size:13px">Períodos aquisitivos ${c.admissao?`<span class="muted small">(admissão ${fmt(c.admissao)})</span>`:'<span class="badge b-wa">admissão não informada — ciclo anual (mais de 1 ano de empresa)</span>'}</h4><div class="tw"><table class="t"><thead><tr><th></th><th>Período</th><th>Gozar até</th><th>Direito</th><th>Gozo</th><th>Venda</th><th>Saldo</th><th>Situação</th></tr></thead><tbody>${ps.map(p=>`<tr class="click ${p.key===t.per?'sel':''}" data-act="per" data-v="${p.key}"><td><input type="radio" ${p.key===t.per?'checked':''} tabindex="-1"></td><td>${p.label?`<b>${p.label}</b> <span class="muted small">${p.uso||'sem gozo lançado'}</span>`:`${fmt(p.ini)} – ${fmt(p.fim)}`}</td><td>${p.concFim?fmt(p.concFim):'—'}</td><td>${p.direito}</td><td>${p.gozo}</td><td>${p.abono}</td><td><b>${p.saldo}</b></td><td><span class="badge ${STATUS[p.status][1]}">${STATUS[p.status][0]}</span></td></tr>`).join('')}</tbody></table></div>`;
+    if(c){const ps=periodos(c,!!t.allPer);
+      perHtml=`<h4 style="margin:14px 0 6px;font-size:13px">Períodos aquisitivos ${c.admissao?`<span class="muted small">(admissão ${fmt(c.admissao)} · 30 dias por período, o saldo mais antigo é usado primeiro)</span> <a class="small" data-act="allPer" style="cursor:pointer">${t.allPer?'mostrar só os atuais':'ver todos os períodos'}</a>`:'<span class="badge b-wa">admissão não informada — ciclo anual (mais de 1 ano de empresa)</span>'}</h4><div class="tw"><table class="t"><thead><tr><th></th><th>Período</th><th>Gozar até</th><th>Direito</th><th>Gozo</th><th>Venda</th><th>Saldo</th><th>Situação</th></tr></thead><tbody>${ps.map(p=>`<tr class="click ${p.key===t.per?'sel':''}" data-act="per" data-v="${p.key}"><td><input type="radio" ${p.key===t.per?'checked':''} tabindex="-1"></td><td>${p.label?`<b>${p.label}</b> <span class="muted small">${p.uso||'sem gozo lançado'}</span>`:`${fmt(p.ini)} – ${fmt(p.fim)}`}</td><td>${p.concFim?fmt(p.concFim):'—'}</td><td>${p.direito}</td><td>${p.gozo}</td><td>${p.abono}</td><td><b>${p.saldo}</b></td><td><span class="badge ${STATUS[p.status][1]}">${STATUS[p.status][0]}</span></td></tr>`).join('')}</tbody></table></div>`;
       const fs=state.ferias.filter(f=>f.colabId===c.id).sort((a,b)=>cmp(b.inicio||b.periodo||'',a.inicio||a.periodo||''));
-      if(fs.length)hist=`<h4 style="margin:16px 0 6px;font-size:13px">Lançamentos de ${esc(first(c.nome))}</h4><div class="tw"><table class="t"><tbody>${fs.map(f=>`<tr ${f.id===t.editId?'class="sel"':''}><td class="small">${perLabel(f.periodo)}${f.obs?' · '+esc(f.obs):''}</td><td>${f.dias>0?`${fmt(f.inicio)} a ${fmt(add(f.inicio,f.dias-1))}`:'—'}</td><td>${f.dias||0} dias${f.abono?` + ${f.abono} vendidos`:''}</td><td style="text-align:right">${f.id===t.editId?'<span class="badge b-fe">editando</span>':`<button class="btn sm" data-act="edit" data-id="${f.id}">Editar</button> <button class="btn sm dan" data-act="delf" data-id="${f.id}">Excluir</button>`}</td></tr>`).join('')}</tbody></table></div>`;}
+      if(fs.length)hist=`<h4 style="margin:16px 0 6px;font-size:13px">Lançamentos de ${esc(first(c.nome))}</h4><div class="tw"><table class="t"><tbody>${fs.map(f=>`<tr ${f.id===t.editId?'class="sel"':''}><td class="small">${(()=>{const c2=colab(f.colabId),pp=c2&&c2.admissao?(allocFerias(c2).parts[f.id]||[]):[];return pp.length>1?pp.map(x=>`${perLabel(x.k)} (${x.d+x.a}d)`).join(' + '):perLabel(perOf(f));})()}${f.obs?' · '+esc(f.obs):''}</td><td>${f.dias>0?`${fmt(f.inicio)} a ${fmt(add(f.inicio,f.dias-1))}`:'—'}</td><td>${f.dias||0} dias${f.abono?` + ${f.abono} vendidos`:''}</td><td style="text-align:right">${f.id===t.editId?'<span class="badge b-fe">editando</span>':`<button class="btn sm" data-act="edit" data-id="${f.id}">Editar</button> <button class="btn sm dan" data-act="delf" data-id="${f.id}">Excluir</button>`}</td></tr>`).join('')}</tbody></table></div>`;}
     return `${mHead(t.editId?'Editar férias':'Lançar férias')}<div class="mb">
     <div class="fg"><label>Colaborador<select id="f_col"><option value="">Selecione…</option>${opts}</select></label></div>${perHtml}
     ${c?`<div class="fg" style="margin-top:14px"><label>Início do gozo<input type="date" id="f_ini" value="${t.inicio||''}"></label><label>Dias de gozo<input type="number" id="f_dias" min="0" max="30" value="${t.dias}" placeholder="ex.: 15"></label><label>Dias vendidos (abono)<input type="number" id="f_ab" min="0" max="10" value="${t.abono}"></label><label>Observação<input id="f_obs" value="${esc(t.obs)}" placeholder="Opcional"></label></div><div id="f_prev">${preview()}</div>${hist}`:''}</div>
@@ -695,11 +714,12 @@ function openFerias(cid,preIni,editId){
    change(el){if(el.id==='f_col'){read();t.cid=el.value;t.per=null;t.editId=null;pickPer();drawModal();}else this.input();},
    act(x,el){read();if(x==='close')closeModal();
      else if(x==='per'){t.per=el.dataset.v;drawModal();}
-     else if(x==='edit'){const f=state.ferias.find(z=>z.id===el.dataset.id);Object.assign(t,{per:f.periodo,inicio:f.inicio,dias:f.dias,abono:f.abono||0,obs:f.obs||'',editId:f.id});drawModal();}
+     else if(x==='allPer'){t.allPer=!t.allPer;drawModal();}
+     else if(x==='edit'){const f=state.ferias.find(z=>z.id===el.dataset.id);Object.assign(t,{per:perOf(f),inicio:f.inicio,dias:f.dias,abono:f.abono||0,obs:f.obs||'',editId:f.id});drawModal();}
      else if(x==='delf'){state.ferias=state.ferias.filter(z=>z.id!==el.dataset.id);touch();buildIdx();drawModal();render();toast('Lançamento excluído');}
      else if(x==='save'){if(!canSave())return;const n=nums();const rec={colabId:t.cid,periodo:t.per,inicio:n.dias>0?n.inicio:'',dias:n.dias,abono:n.abono,obs:t.obs};
        if(t.editId)Object.assign(state.ferias.find(z=>z.id===t.editId),rec);else state.ferias.push({id:uid(),...rec});
-       const c=colab(t.cid),per=periodos(c).find(p=>p.key===t.per);touch();closeModal();render();toast(`Férias salvas · saldo remanescente: ${per?per.saldo:0} dias`);}}});
+       const c=colab(t.cid);normalizePeriods(c);const per=periodos(c,true).find(p=>p.fr.some(f=>f.id===(t.editId||state.ferias[state.ferias.length-1].id)))||periodos(c).find(p=>p.key===t.per);touch();closeModal();render();toast(`Férias salvas · saldo remanescente: ${per?per.saldo:0} dias`);}}});
 }
 
 /* ---------- Cadastros ---------- */
@@ -1267,6 +1287,7 @@ async function afterLogin(session){
   if(error||!p){await sb.auth.signOut();return renderLogin('entrar','','Não encontramos seu perfil. O acesso é restrito a e-mails @vtal.com.');}
   PROFILE=p;document.body.className='role-'+p.role;
   try{await loadAll();}catch(e){return renderLogin('entrar','','Erro ao carregar os dados: '+(e.message||e));}
+  if(p.role==='admin'){let n=0;state.colaboradores.forEach(c=>n+=normalizePeriods(c));if(n){touch();console.info('Períodos de férias corrigidos:',n);}}
   const h=location.hash.slice(1);if(['geral','escala','historico','ferias','cadastros','config'].includes(h))ui.tab=h;
   render();
 }
