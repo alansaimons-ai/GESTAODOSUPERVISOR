@@ -97,10 +97,28 @@ function nearVac(cid,start,end){const v=IDX.vac[cid];if(!v||!v.size)return null;
   for(let i=1;i<=B.antes;i++){const d=add(end,i);if(v.has(d)&&!v.has(add(d,-1)))return{tipo:'antes',d};}
   for(let i=1;i<=B.depois;i++){const d=add(start,-i);if(v.has(d)&&!v.has(add(d,1)))return{tipo:'depois',d};}
   return null;}
+/* ---------- folgas de plantão: dia certo e sem colisão ----------
+   J3: folga ideal na sexta (antes) e na segunda (depois); duas folgas no mesmo dia só se forem de turnos diferentes.
+   Sobreaviso: folga em qualquer dia útil, sem coincidir com outra folga da equipe. */
+const turnoOf=c=>{const h=tmin(c.entrada||'08:00');return h>=1200||h<240?'noite':h>=720?'tarde':'manha';};
+const TURNO_NOME={manha:'manhã',tarde:'tarde',noite:'noite'};
+const FOLGA_COD=new Set(['FO','FA','BH']);
+const folgasNoDia=(c,d)=>colabsOfArea(c.areaId,d.slice(0,7)).filter(x=>x.id!==c.id&&FOLGA_COD.has(getV(x.id,d)));
+const diaLivre=(c,d)=>d&&isWork(d)&&getV(c.id,d)===undefined&&!onVac(c.id,d);
+function folgaDias(b,lado){const r=[];for(let i=1;i<=7;i++){const d=lado==='antes'?add(b.start,-i):add(b.end,i);if(isWork(d))r.push(d);}return r;}
+function escolheFolga(c,b,lado,tipo){const pad0=lado==='antes'?b.folgaAntes:b.folgaDepois;const wk=folgaDias(b,lado);
+  const livre=d=>diaLivre(c,d),nada=d=>!folgasNoDia(c,d).length,outroTurno=d=>!folgasNoDia(c,d).some(x=>turnoOf(x)===turnoOf(c));
+  if(tipo==='J3'){const sexSeg=[...new Set([pad0,...(lado==='antes'?[wk.find(d=>dow(d)===5),wk.find(d=>dow(d)===1)]:[wk.find(d=>dow(d)===1),wk.find(d=>dow(d)===5)])].filter(Boolean))];const outros=wk.filter(d=>!sexSeg.includes(d));
+    return sexSeg.find(d=>livre(d)&&nada(d))||sexSeg.find(d=>livre(d)&&outroTurno(d))||outros.find(d=>livre(d)&&nada(d))||outros.find(d=>livre(d)&&outroTurno(d))||(livre(pad0)?pad0:null);}
+  const cand=[...new Set([pad0,...wk])];return cand.find(d=>livre(d)&&nada(d))||(livre(pad0)?pad0:cand.find(livre))||null;}
+function placeFolga(c,b,lado,tipo){const d=escolheFolga(c,b,lado,tipo);if(d)setV(c.id,d,'FO');return d;}
 function limparMes(ym,aid){
   const cs=colabsOfArea(aid,ym);const own=ownedDays(ym);const prevBlocks=blocksOfMonth(ymAdd(ym,-1));
-  const protect=new Set();prevBlocks.forEach(b=>cs.forEach(c=>{const r=inBlock(c.id,b);if(r.J3||r.SA)protect.add(c.id+'|'+b.folgaDepois);}));
-  let n=0;cs.forEach(c=>own.forEach(d=>{const v=getV(c.id,d);if(v==='J3'||isNum(v)||(v==='FO'&&!protect.has(c.id+'|'+d))){setV(c.id,d,null);n++;}}));return n;}
+  const protect=new Set();prevBlocks.forEach(b=>cs.forEach(c=>{const r=inBlock(c.id,b);if(r.J3||r.SA)[b.folgaDepois,...folgaDias(b,'depois')].forEach(d=>protect.add(c.id+'|'+d));}));
+  // folgas deste mês que caíram fora dele (semana anterior ao 1º plantão / semana seguinte ao último)
+  const nxt=ymAdd(ym,1),nxtGerado=hasMonthData(nxt,aid),fora=[];blocksAll(ym).forEach(b=>cs.forEach(c=>{const r=inBlock(c.id,b);if(!(r.J3||r.SA))return;[...folgaDias(b,'antes'),...folgaDias(b,'depois')].forEach(d=>{if(!own.has(d)&&(d.slice(0,7)<ym||!nxtGerado))fora.push([c,d]);});}));
+  let n=0;cs.forEach(c=>own.forEach(d=>{const v=getV(c.id,d);if(v==='J3'||isNum(v)||(v==='FO'&&!protect.has(c.id+'|'+d))){setV(c.id,d,null);n++;}}));
+  fora.forEach(([c,d])=>{if(getV(c.id,d)==='FO'&&!protect.has(c.id+'|'+d)){setV(c.id,d,null);n++;}});return n;}
 function gerarEscala(ym,aid){
   const a=area(aid);buildIdx();
   const cs=escalaveis(aid);const own=ownedDays(ym);const blocks=blocksAll(ym);const prevBlocks=blocksOfMonth(ymAdd(ym,-1));
@@ -123,20 +141,20 @@ function gerarEscala(ym,aid){
     if(!b.iso&&jd.length)for(let i=0;i<a.j3Vagas;i++){
       const base=cs.filter(c=>c.j3&&!used.has(c.id)&&freeDays(c,jd)&&!vacIn(c,b.folgaAntes,b.folgaDepois));let ok=order('J3',b,base.filter(c=>!nearVac(c.id,b.start,b.end)));if(!ok.length)ok=order('J3',b,base);
       const c=ok[0];if(!c){missing.push(`${diasLabel(b.dias)}: sem colaborador para J3`);continue;}
-      jd.forEach(d=>setV(c.id,d,'J3'));if(a.folgaJ3){putFO(c,b.folgaAntes);putFO(c,b.folgaDepois);}used.add(c.id);mark(c,'J3',b);
+      jd.forEach(d=>setV(c.id,d,'J3'));if(a.folgaJ3){placeFolga(c,b,'antes','J3');placeFolga(c,b,'depois','J3');}used.add(c.id);mark(c,'J3',b);
     }
     if(a.saModo==='dia'||b.iso){
       for(const d of b.dias)for(let i=0;i<a.saVagas;i++){
         let cand=cs.filter(c=>c.sa!==false&&freeDays(c,[d]));const cv=cand.filter(c=>!nearVac(c.id,b.start,b.end));if(cv.length)cand=cv;
         let ok=order('SA',b,cand.filter(c=>!used.has(c.id)));if(!ok.length)ok=order('SA',b,cand);
         const c=ok[0];if(!c){missing.push(`${DSEM[dow(d)]} ${fmtS(d)}: sem colaborador para sobreaviso`);continue;}
-        setV(c.id,d,hoursFor(a,d));if(!used.has(c.id)){if(a.folgaSA&&!b.iso)putFO(c,b.folgaAntes);mark(c,'SA',b);}used.add(c.id);
+        setV(c.id,d,hoursFor(a,d));if(!used.has(c.id)){if(a.folgaSA&&!b.iso)placeFolga(c,b,'antes','SA');mark(c,'SA',b);}used.add(c.id);
       }
     }else{
       for(let i=0;i<a.saVagas;i++){
         const base=cs.filter(c=>c.sa!==false&&!used.has(c.id)&&freeDays(c,b.dias)&&!vacIn(c,b.folgaAntes,b.end));let ok=order('SA',b,base.filter(c=>!nearVac(c.id,b.start,b.end)));if(!ok.length)ok=order('SA',b,base);
         const c=ok[0];if(!c){missing.push(`${diasLabel(b.dias)}: sem colaborador para sobreaviso`);continue;}
-        b.dias.forEach(d=>setV(c.id,d,hoursFor(a,d)));if(a.folgaSA)putFO(c,b.folgaAntes);used.add(c.id);mark(c,'SA',b);
+        b.dias.forEach(d=>setV(c.id,d,hoursFor(a,d)));if(a.folgaSA)placeFolga(c,b,'antes','SA');used.add(c.id);mark(c,'SA',b);
       }
     }
   }
@@ -603,9 +621,9 @@ function openCell(cid,d){
      else if(x==='code'){setV(cid,d,el.dataset.v);done();}
      else if(x==='clear'){setV(cid,d,null);done();}
      else if(x==='folgaPos'){setV(cid,b.folgaDepois,'FO');done('Folga pós-plantão lançada');}
-     else if(x==='blkJ3'){b.dias.forEach(dd=>{const vv=getV(cid,dd);if(vv==='J3'||isNum(vv))setV(cid,dd,null);});j3Days(b).forEach(dd=>setV(cid,dd,'J3'));if(a.folgaJ3){[b.folgaAntes,b.folgaDepois].forEach(f=>{if(getV(cid,f)==null)setV(cid,f,'FO');});}done('J3 lançado');}
-     else if(x==='blkSA'){b.dias.forEach(dd=>{if(getV(cid,dd)==='J3')setV(cid,dd,null);setV(cid,dd,hoursFor(a,dd));});if(a.folgaSA&&!b.iso&&getV(cid,b.folgaAntes)==null)setV(cid,b.folgaAntes,'FO');done('Sobreaviso lançado');}
-     else if(x==='blkDel'){b.dias.forEach(dd=>{const vv=getV(cid,dd);if(vv==='J3'||isNum(vv))setV(cid,dd,null);});[b.folgaAntes,b.folgaDepois].forEach(f=>{if(getV(cid,f)==='FO')setV(cid,f,null);});done('Removido do plantão');}
+     else if(x==='blkJ3'){b.dias.forEach(dd=>{const vv=getV(cid,dd);if(vv==='J3'||isNum(vv))setV(cid,dd,null);});j3Days(b).forEach(dd=>setV(cid,dd,'J3'));if(a.folgaJ3){placeFolga(c,b,'antes','J3');placeFolga(c,b,'depois','J3');}done('J3 lançado');}
+     else if(x==='blkSA'){b.dias.forEach(dd=>{if(getV(cid,dd)==='J3')setV(cid,dd,null);setV(cid,dd,hoursFor(a,dd));});if(a.folgaSA&&!b.iso)placeFolga(c,b,'antes','SA');done('Sobreaviso lançado');}
+     else if(x==='blkDel'){b.dias.forEach(dd=>{const vv=getV(cid,dd);if(vv==='J3'||isNum(vv))setV(cid,dd,null);});[...new Set([b.folgaAntes,b.folgaDepois,...folgaDias(b,'antes'),...folgaDias(b,'depois')])].forEach(f=>{if(getV(cid,f)==='FO')setV(cid,f,null);});done('Removido do plantão');}
      else if(x==='sn'){closeModal();openSN(cid,d);}},
    change(el){if(el.id==='c_ac'){setAc(cid,d,el.checked);touch();if(el.checked&&b&&getV(cid,b.folgaDepois)==null){setV(cid,b.folgaDepois,'FO');toast(`Acionado — folga pós-plantão lançada em ${fmtS(b.folgaDepois)}`);}drawModal();render();}}});
 }
@@ -788,6 +806,7 @@ function rConfig(){
   ${regrasCard()}<div class="card"><h3>Regras fixas do sistema</h3><ul class="rules small">
    <li><b>Véspera e retorno de férias</b>: sem plantão nos ${vacBuf().antes} dia(s) antes do início das férias e no(s) ${vacBuf().depois} dia(s) após o retorno, quando houver outra pessoa disponível.</li>
    <li><b>Formato</b>: igual à planilha — número na célula = horas de sobreaviso no dia; J3, FO, BH, FA, AT como siglas. Férias vêm do módulo de férias (FE).</li>
+   <li><b>Folgas do plantão</b>: J3 folga de preferência na <b>sexta</b> (antes) e na <b>segunda</b> (depois); na equipe, duas folgas no mesmo dia só em exceção e nunca do mesmo turno (turno pelo horário de entrada: manhã, tarde ou noite). Sobreaviso: folga em qualquer dia útil da semana, sem coincidir com outra folga da equipe.</li>
    <li><b>Padrão por área</b>: quantidade de J3 e sobreaviso por fim de semana, horas de sábado/domingo/feriado, noites de semana e folgas automáticas.</li>
    <li><b>Feriado emendado</b> (sexta ou segunda) entra no plantão do fim de semana; feriado isolado no meio da semana vira um plantão próprio.</li>
    <li><b>Rodízio</b>: primeiro quem tem menos plantões no mês, depois quem tem menos do mesmo regime, depois quem está há mais tempo sem aquele regime (pelo histórico) e com menos horas nos últimos 90 dias. Evita fins de semana seguidos e nunca escala quem está de férias.</li>
@@ -1226,7 +1245,12 @@ function ruleAlerts(ym,aid){const out=[],rs=regrasAtivas().filter(r=>r.tipo!=='t
     if(r.tipo==='naoJuntos'&&cs.some(c=>c.id===r.c1||c.id===r.c2))blocksAll(ym).forEach(b=>{const on=id=>b.dias.some(d=>{const v=getV(id,d);return v==='J3'||isNum(v);});if(on(r.c1)&&on(r.c2))out.push({lvl:'warn',msg:`Regra: ${cNome(r.c1)} e ${cNome(r.c2)} juntos em ${diasLabel(b.dias)}`});});
     if(r.tipo==='bloqueio'&&cs.some(c=>c.id===r.c)){const bad=monthDays(ym).filter(d=>{const v=getV(r.c,d);const tt=v==='J3'?'J3':isNum(v)?'SA':null;if(!tt)return false;if(r.regime&&r.regime!=='todos'&&r.regime!==tt)return false;return (r.dows||[]).includes(dow(d))||(r.de&&d>=r.de&&(!r.ate||d<=r.ate));});if(bad.length)out.push({lvl:'warn',msg:`Regra: ${regraDesc(r)} — escalado em ${bad.map(fmtS).join(', ')}`});}
   });return out;}
-{const _ea=escalaAlerts;escalaAlerts=function(ym,aid){const a=_ea(ym,aid);return a.length===1&&a[0].lvl==='info'&&/não foi gerada/.test(a[0].msg)?a:a.concat(ruleAlerts(ym,aid));};}
+function folgaAlerts(ym,aid){const out=[];if(!hasMonthData(ym,aid))return out;const cs=colabsOfArea(aid,ym);const ar=area(aid);
+  monthDays(ym).filter(isWork).forEach(d=>{const f=cs.filter(c=>FOLGA_COD.has(getV(c.id,d)));if(f.length<2)return;const by={};f.forEach(c=>(by[turnoOf(c)]=by[turnoOf(c)]||[]).push(c));
+    Object.entries(by).forEach(([t,l])=>{if(l.length>1)out.push({lvl:'warn',msg:`${DSEM[dow(d)]} ${fmtS(d)}: ${l.map(c=>first(c.nome)).join(' e ')} de folga no mesmo turno (${TURNO_NOME[t]})`});});
+    if(Object.keys(by).length>1&&!Object.values(by).some(l=>l.length>1))out.push({lvl:'info',msg:`${DSEM[dow(d)]} ${fmtS(d)}: ${f.map(c=>`${first(c.nome)} (${TURNO_NOME[turnoOf(c)]})`).join(' e ')} de folga no mesmo dia — turnos diferentes, exceção aceita`});});
+  return out;}
+{const _ea=escalaAlerts;escalaAlerts=function(ym,aid){const a=_ea(ym,aid);return a.length===1&&a[0].lvl==='info'&&/não foi gerada/.test(a[0].msg)?a:a.concat(folgaAlerts(ym,aid),ruleAlerts(ym,aid));};}
 function regrasCard(){const rs=regras();return `<div class="card"><h3>Regras personalizadas da escala ${rs.length?`<span class="badge">${regrasAtivas().length} ativas</span>`:''}</h3><p class="hint" style="margin-top:0">Use quando notar erros ou vícios na escala. As regras de limite, intervalo, “não juntos” e restrição são seguidas pelo <b>Gerar escala</b> (quando houver outra pessoa disponível) e viram alerta na aba Escala. Orientações em texto aparecem para quem monta a escala.</p>
   ${rs.length?`<div class="regs">${rs.map(r=>`<div class="reg ${r.ativa===false?'off':''}"><span class="badge ${r.tipo==='texto'?'':'b-sa'}">${REG_TIPOS[r.tipo]||r.tipo}</span><div class="rt"><b>${esc(regraDesc(r))}</b>${r.obs?`<div class="muted small">${esc(r.obs)}</div>`:''}<div class="muted small">${r.autor?`por ${esc(r.autor)}`:''}${r.criada?` em ${fmt(r.criada)}`:''}</div></div>${isAdmin()?`<label class="chk" title="Ativar/desativar"><input type="checkbox" data-chg="regTog" data-id="${r.id}" ${r.ativa!==false?'checked':''}> ativa</label><button class="btn sm gh" data-act="regEdit" data-id="${r.id}">Editar</button><button class="btn sm dan" data-act="regDel" data-id="${r.id}">Excluir</button>`:''}</div>`).join('')}</div>`:'<div class="alert ok">Nenhuma regra personalizada ainda.</div>'}
   <div class="bar needs-admin" style="margin-top:12px"><button class="btn pri" data-act="regNew">+ Nova regra</button></div></div>`;}
