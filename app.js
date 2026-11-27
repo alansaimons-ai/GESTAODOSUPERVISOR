@@ -106,11 +106,24 @@ const FOLGA_COD=new Set(['FO','FA','BH']);
 const folgasNoDia=(c,d)=>colabsOfArea(c.areaId,d.slice(0,7)).filter(x=>x.id!==c.id&&FOLGA_COD.has(getV(x.id,d)));
 const diaLivre=(c,d)=>d&&isWork(d)&&getV(c.id,d)===undefined&&!onVac(c.id,d);
 function folgaDias(b,lado){const r=[];for(let i=1;i<=7;i++){const d=lado==='antes'?add(b.start,-i):add(b.end,i);if(isWork(d))r.push(d);}return r;}
+const ajusta=(d,passo)=>{for(let k=0;k<4&&d&&!isWork(d);k++)d=add(d,passo);return d;};
+// J3: as duas folgas no mesmo dia da semana — sexta antes + sexta da semana seguinte, ou segunda da semana anterior + segunda depois.
+// Assim uma folga fica junto do J3 e a outra emenda um fim de semana livre.
+function paresJ3(b){const sat=b.key;return [{k:'sex',dias:[b.folgaAntes,ajusta(add(sat,6),-1)]},{k:'seg',dias:[ajusta(add(sat,-5),1),b.folgaDepois]}];}
+function escolheFolgasJ3(c,b,alt){const livre=d=>diaLivre(c,d);const outras=d=>folgasNoDia(c,d);
+  const score=p=>{if(!p.dias.every(livre))return 1e6;let sc=0;p.dias.forEach(d=>{const o=outras(d);if(o.some(x=>turnoOf(x)===turnoOf(c)))sc+=1000;sc+=o.length*10;});return sc;};
+  const ps=paresJ3(b);if(alt)ps.reverse();const best=ps.slice().sort((x,y)=>score(x)-score(y))[0];
+  if(score(best)<1000)return best.dias;
+  // nenhum par sem colisão do mesmo turno: escolhe dia a dia
+  return [escolheFolga(c,b,'antes','J3'),escolheFolga(c,b,'depois','J3')];}
+function placeFolgasJ3(c,b,alt){const ds=escolheFolgasJ3(c,b,alt).filter(Boolean);ds.forEach(d=>setV(c.id,d,'FO'));return ds;}
 function escolheFolga(c,b,lado,tipo){const pad0=lado==='antes'?b.folgaAntes:b.folgaDepois;const wk=folgaDias(b,lado);
   const livre=d=>diaLivre(c,d),nada=d=>!folgasNoDia(c,d).length,outroTurno=d=>!folgasNoDia(c,d).some(x=>turnoOf(x)===turnoOf(c));
   if(tipo==='J3'){const sexSeg=[...new Set([pad0,...(lado==='antes'?[wk.find(d=>dow(d)===5),wk.find(d=>dow(d)===1)]:[wk.find(d=>dow(d)===1),wk.find(d=>dow(d)===5)])].filter(Boolean))];const outros=wk.filter(d=>!sexSeg.includes(d));
     return sexSeg.find(d=>livre(d)&&nada(d))||sexSeg.find(d=>livre(d)&&outroTurno(d))||outros.find(d=>livre(d)&&nada(d))||outros.find(d=>livre(d)&&outroTurno(d))||(livre(pad0)?pad0:null);}
-  const cand=[...new Set([pad0,...wk])];return cand.find(d=>livre(d)&&nada(d))||(livre(pad0)?pad0:cand.find(livre))||null;}
+  // sobreaviso: qualquer dia útil da semana anterior, sem outra folga; segunda e sexta ficam por último (prioridade do J3)
+  const meio=wk.filter(d=>dow(d)>=2&&dow(d)<=4),ponta=wk.filter(d=>dow(d)===1||dow(d)===5);const cand=[...new Set([...meio,...ponta,pad0])];
+  return cand.find(d=>livre(d)&&nada(d))||cand.find(d=>livre(d)&&!folgasNoDia(c,d).some(x=>turnoOf(x)===turnoOf(c)))||(livre(pad0)?pad0:cand.find(livre))||null;}
 function placeFolga(c,b,lado,tipo){const d=escolheFolga(c,b,lado,tipo);if(d)setV(c.id,d,'FO');return d;}
 function limparMes(ym,aid){
   const cs=colabsOfArea(aid,ym);const own=ownedDays(ym);const prevBlocks=blocksOfMonth(ymAdd(ym,-1));
@@ -141,7 +154,7 @@ function gerarEscala(ym,aid){
     if(!b.iso&&jd.length)for(let i=0;i<a.j3Vagas;i++){
       const base=cs.filter(c=>c.j3&&!used.has(c.id)&&freeDays(c,jd)&&!vacIn(c,b.folgaAntes,b.folgaDepois));let ok=order('J3',b,base.filter(c=>!nearVac(c.id,b.start,b.end)));if(!ok.length)ok=order('J3',b,base);
       const c=ok[0];if(!c){missing.push(`${diasLabel(b.dias)}: sem colaborador para J3`);continue;}
-      jd.forEach(d=>setV(c.id,d,'J3'));if(a.folgaJ3){placeFolga(c,b,'antes','J3');placeFolga(c,b,'depois','J3');}used.add(c.id);mark(c,'J3',b);
+      jd.forEach(d=>setV(c.id,d,'J3'));if(a.folgaJ3)placeFolgasJ3(c,b,H[c.id].r<.5);used.add(c.id);mark(c,'J3',b);
     }
     if(a.saModo==='dia'||b.iso){
       for(const d of b.dias)for(let i=0;i<a.saVagas;i++){
@@ -621,7 +634,7 @@ function openCell(cid,d){
      else if(x==='code'){setV(cid,d,el.dataset.v);done();}
      else if(x==='clear'){setV(cid,d,null);done();}
      else if(x==='folgaPos'){setV(cid,b.folgaDepois,'FO');done('Folga pós-plantão lançada');}
-     else if(x==='blkJ3'){b.dias.forEach(dd=>{const vv=getV(cid,dd);if(vv==='J3'||isNum(vv))setV(cid,dd,null);});j3Days(b).forEach(dd=>setV(cid,dd,'J3'));if(a.folgaJ3){placeFolga(c,b,'antes','J3');placeFolga(c,b,'depois','J3');}done('J3 lançado');}
+     else if(x==='blkJ3'){b.dias.forEach(dd=>{const vv=getV(cid,dd);if(vv==='J3'||isNum(vv))setV(cid,dd,null);});j3Days(b).forEach(dd=>setV(cid,dd,'J3'));if(a.folgaJ3)placeFolgasJ3(c,b);done('J3 lançado');}
      else if(x==='blkSA'){b.dias.forEach(dd=>{if(getV(cid,dd)==='J3')setV(cid,dd,null);setV(cid,dd,hoursFor(a,dd));});if(a.folgaSA&&!b.iso)placeFolga(c,b,'antes','SA');done('Sobreaviso lançado');}
      else if(x==='blkDel'){b.dias.forEach(dd=>{const vv=getV(cid,dd);if(vv==='J3'||isNum(vv))setV(cid,dd,null);});[...new Set([b.folgaAntes,b.folgaDepois,...folgaDias(b,'antes'),...folgaDias(b,'depois')])].forEach(f=>{if(getV(cid,f)==='FO')setV(cid,f,null);});done('Removido do plantão');}
      else if(x==='sn'){closeModal();openSN(cid,d);}},
@@ -806,7 +819,7 @@ function rConfig(){
   ${regrasCard()}<div class="card"><h3>Regras fixas do sistema</h3><ul class="rules small">
    <li><b>Véspera e retorno de férias</b>: sem plantão nos ${vacBuf().antes} dia(s) antes do início das férias e no(s) ${vacBuf().depois} dia(s) após o retorno, quando houver outra pessoa disponível.</li>
    <li><b>Formato</b>: igual à planilha — número na célula = horas de sobreaviso no dia; J3, FO, BH, FA, AT como siglas. Férias vêm do módulo de férias (FE).</li>
-   <li><b>Folgas do plantão</b>: J3 folga de preferência na <b>sexta</b> (antes) e na <b>segunda</b> (depois); na equipe, duas folgas no mesmo dia só em exceção e nunca do mesmo turno (turno pelo horário de entrada: manhã, tarde ou noite). Sobreaviso: folga em qualquer dia útil da semana, sem coincidir com outra folga da equipe.</li>
+   <li><b>Folgas do J3</b>: as duas folgas caem no mesmo dia da semana — <b>sexta com sexta</b> (sexta antes do J3 + sexta da semana seguinte) ou <b>segunda com segunda</b> (segunda da semana anterior + segunda depois do J3) — para emendar ao menos um fim de semana livre. Na mesma equipe, duas folgas no mesmo dia só em exceção e nunca do mesmo turno (turno pelo horário de entrada). Equipes diferentes não se afetam.</li><li><b>Folgas do sobreaviso</b>: qualquer dia útil da semana anterior, sem coincidir com outra folga da equipe; segunda e sexta ficam por último, porque a prioridade é de quem folga pelo J3.</li>
    <li><b>Padrão por área</b>: quantidade de J3 e sobreaviso por fim de semana, horas de sábado/domingo/feriado, noites de semana e folgas automáticas.</li>
    <li><b>Feriado emendado</b> (sexta ou segunda) entra no plantão do fim de semana; feriado isolado no meio da semana vira um plantão próprio.</li>
    <li><b>Rodízio</b>: primeiro quem tem menos plantões no mês, depois quem tem menos do mesmo regime, depois quem está há mais tempo sem aquele regime (pelo histórico) e com menos horas nos últimos 90 dias. Evita fins de semana seguidos e nunca escala quem está de férias.</li>
